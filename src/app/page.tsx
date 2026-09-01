@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { NEEDS } from "@/data/needs";
 import { NeedCard } from "@/components/NeedCard";
-import { TOTAL_COMPARISONS } from "@/lib/storage";
 import { CATEGORY_GRADIENT, HERO_GRADIENT } from "@/lib/theme";
 
 const needsById = new Map(NEEDS.map((n) => [n.id, n]));
@@ -10,7 +9,7 @@ const autonomy = needsById.get("autonomy")!;
 
 export default function Home() {
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col items-center justify-center gap-6 px-4 py-10 text-center">
+    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col items-center gap-6 px-4 pb-10 pt-6 text-center">
       <p
         className="bg-clip-text text-sm font-semibold uppercase tracking-widest text-transparent"
         style={{ backgroundImage: HERO_GRADIENT }}
@@ -19,7 +18,7 @@ export default function Home() {
       </p>
 
       <h1 className="font-serif text-3xl leading-tight text-stone-800">
-        Discover, understand, and explain your needs to your partner
+        Discover, understand, and explain your needs
       </h1>
 
       <div className="grid w-full grid-cols-2 gap-2">
@@ -30,8 +29,7 @@ export default function Home() {
       <p className="text-base leading-relaxed text-stone-600">
         You&apos;ll be shown two relationship needs at a time and asked a
         simple question: if you could have more of only one, which would you
-        choose? After {TOTAL_COMPARISONS} quick comparisons, we&apos;ll show
-        you the needs that matter most to you right now.
+        choose?
       </p>
 
       <div className="flex w-full flex-col gap-3">
