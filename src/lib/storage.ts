@@ -17,6 +17,7 @@ export { MIN_COMPARISONS, EXTENDED_MAX_COMPARISONS };
 const ASSESSMENT_KEY = "rn-assessment-state-v4";
 const RESULTS_KEY = "rn-results-v3";
 const PARTNER_RANKS_KEY = "rn-partner-ranks-v3";
+const PENDING_INVITE_KEY = "rn-pending-invite-v1";
 
 const KNOWN_NEED_IDS = new Set(NEEDS.map((n) => n.id));
 
@@ -119,7 +120,51 @@ export function clearResults(): void {
   window.localStorage.removeItem(RESULTS_KEY);
 }
 
-/** Packs each need's final rank (1-30, fixed NEEDS order) into a URL-safe string. */
+/**
+ * The invitation an invited partner is currently working through.
+ *
+ * Held in the browser only for the length of their assessment: it tells the
+ * save step to attach the finished result to the invitation instead of
+ * creating an unconnected one. Cleared as soon as it has been used.
+ */
+export interface PendingInvite {
+  token: string;
+  inviterName: string;
+}
+
+export function savePendingInvite(invite: PendingInvite): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(PENDING_INVITE_KEY, JSON.stringify(invite));
+}
+
+export function loadPendingInvite(): PendingInvite | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PENDING_INVITE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PendingInvite;
+    if (typeof parsed?.token !== "string" || typeof parsed?.inviterName !== "string") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingInvite(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(PENDING_INVITE_KEY);
+}
+
+/**
+ * Packs each need's final rank (1-46, fixed NEEDS order) into a URL-safe string.
+ *
+ * Retained so invitation links sent before server persistence existed keep
+ * working. New invitations never carry results in the URL — they carry an
+ * opaque token, and the partner sees nothing until they finish their own
+ * assessment.
+ */
 export function encodeShareableRanks(history: ComparisonRecord[]): string {
   const ranking = buildRanking(history);
   const rankById = new Map(ranking.map((r) => [r.id, r.rank]));

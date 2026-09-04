@@ -9,6 +9,17 @@
  * Cards are what users compare against each other. Core Needs are the
  * higher-level lens results are eventually reported through.
  */
+/**
+ * Identifies the card set a stored assessment was answered against.
+ *
+ * Persisted alongside every saved history: need ids are only meaningful
+ * relative to a taxonomy, so a future change to the cards must be able to
+ * tell old results apart rather than silently re-score them against cards
+ * the person never saw. Bump this whenever ids are added, removed, or
+ * given different meanings.
+ */
+export const TAXONOMY_VERSION = "v2-9core-46";
+
 export type NeedCategory =
   | "Love & Affection"
   | "Intimacy & Desire"
