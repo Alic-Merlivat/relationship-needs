@@ -1,4 +1,8 @@
-import { CATEGORY_EMOJI, type RelationshipNeed } from "@/data/needs";
+import {
+  CATEGORY_EMOJI,
+  CATEGORY_SHORT_LABEL,
+  type RelationshipNeed,
+} from "@/data/needs";
 import { CATEGORY_GRADIENT } from "@/lib/theme";
 
 export function NeedCard({
@@ -17,7 +21,7 @@ export function NeedCard({
       style={{ background: CATEGORY_GRADIENT[need.category] }}
     >
       <span className="rounded-full bg-white/20 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide">
-        {CATEGORY_EMOJI[need.category]} {need.category}
+        {CATEGORY_EMOJI[need.category]} {CATEGORY_SHORT_LABEL[need.category]}
       </span>
       <span className="font-serif text-xl font-semibold leading-tight">
         {need.name}

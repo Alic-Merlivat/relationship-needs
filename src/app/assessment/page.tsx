@@ -7,7 +7,7 @@ import { NeedCard } from "@/components/NeedCard";
 import { exploredCategories } from "@/lib/ranking";
 import { CATEGORY_ACCENT, HERO_GRADIENT } from "@/lib/theme";
 import {
-  TOTAL_COMPARISONS,
+  EXTENDED_MAX_COMPARISONS,
   advanceAssessment,
   clearAssessmentState,
   createAssessmentState,
@@ -66,7 +66,7 @@ export default function AssessmentPage() {
   }
 
   const progress = state.history.length;
-  const progressPct = Math.round((progress / TOTAL_COMPARISONS) * 100);
+  const progressPct = Math.round((progress / EXTENDED_MAX_COMPARISONS) * 100);
   const touched = exploredCategories(state.history);
 
   return (
@@ -86,7 +86,7 @@ export default function AssessmentPage() {
           />
         </div>
         <span className="flex-none text-xs font-medium text-stone-400">
-          {progress + 1}/{TOTAL_COMPARISONS}
+          {progress + 1}/{EXTENDED_MAX_COMPARISONS}
         </span>
       </div>
 

@@ -1,7 +1,7 @@
 import { NEEDS, type NeedCategory, type RelationshipNeed } from "@/data/needs";
 import {
+  computeTieBands,
   fitBradleyTerry,
-  zScoreBetween,
   TIE_Z_THRESHOLD,
   type ComparisonRecord,
   type EvidenceTier,
@@ -35,22 +35,14 @@ const needsById = new Map<string, RelationshipNeed>(NEEDS.map((n) => [n.id, n]))
 export function buildRanking(history: ComparisonRecord[]): RankedNeedView[] {
   const ids = NEEDS.map((n) => n.id);
   const fit = fitBradleyTerry(ids, history);
+  const bands = computeTieBands(ids, fit, TIE_Z_THRESHOLD);
 
-  const sorted = [...ids].sort((a, b) => fit.strength[b] - fit.strength[a]);
+  const bandIndexOf = new Map<string, number>();
+  bands.forEach((band, bandIndex) => {
+    band.forEach((id) => bandIndexOf.set(id, bandIndex));
+  });
 
-  const tiedWithNext: Record<string, boolean> = {};
-  let anchorId = sorted[0];
-  for (let index = 0; index < sorted.length; index++) {
-    const id = sorted[index];
-    const nextId = sorted[index + 1];
-    if (nextId === undefined) {
-      tiedWithNext[id] = false;
-      break;
-    }
-    const staysInBand = zScoreBetween(fit, anchorId, nextId) < TIE_Z_THRESHOLD;
-    tiedWithNext[id] = staysInBand;
-    if (!staysInBand) anchorId = nextId;
-  }
+  const sorted = bands.flat();
 
   return sorted.map((id, index) => ({
     ...needsById.get(id)!,
@@ -60,7 +52,8 @@ export function buildRanking(history: ComparisonRecord[]): RankedNeedView[] {
     wins: fit.wins[id],
     losses: fit.losses[id],
     appearances: fit.appearances[id],
-    tiedWithNext: tiedWithNext[id],
+    tiedWithNext:
+      index + 1 < sorted.length && bandIndexOf.get(id) === bandIndexOf.get(sorted[index + 1]),
   }));
 }
 
@@ -77,39 +70,6 @@ export function extendForTies(
     end++;
   }
   return ranked.slice(0, end);
-}
-
-type RankTier = "top3" | "top10" | "rest";
-
-function rankTierOf(rank: number): RankTier {
-  if (rank <= 3) return "top3";
-  if (rank <= 10) return "top10";
-  return "rest";
-}
-
-const COPY_MATRIX: Record<RankTier, Record<EvidenceTier, string>> = {
-  top3: {
-    strong: "One of your strongest relationship priorities.",
-    emerging:
-      "Likely one of your top priorities — a few more comparisons would confirm it.",
-    insufficient:
-      "Ranked highly so far, though we don't have enough head-to-head data to be fully confident.",
-  },
-  top10: {
-    strong: "A clear priority for you.",
-    emerging: "Likely an important priority for you.",
-    insufficient:
-      "Placed in your top 10, but with limited data — take this placement lightly.",
-  },
-  rest: {
-    strong: "Not currently among your top priorities.",
-    emerging: "Not currently among your top priorities.",
-    insufficient: "Not enough data to place this one confidently.",
-  },
-};
-
-export function copyFor(rank: number, tier: EvidenceTier): string {
-  return COPY_MATRIX[rankTierOf(rank)][tier];
 }
 
 /** Categories touched by at least one comparison so far, for a neutral mid-assessment progress cue. */

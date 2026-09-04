@@ -3,10 +3,10 @@ import type { ReactNode } from "react";
 import { CATEGORY_GRADIENT, HERO_GRADIENT } from "@/lib/theme";
 
 const STEP_GRADIENT = {
-  1: CATEGORY_GRADIENT.Connection,
-  2: CATEGORY_GRADIENT.Security,
-  3: CATEGORY_GRADIENT.Respect,
-  4: CATEGORY_GRADIENT.Communication,
+  1: CATEGORY_GRADIENT["Connection & Togetherness"],
+  2: CATEGORY_GRADIENT["Security & Trust"],
+  3: CATEGORY_GRADIENT["Respect & Appreciation"],
+  4: CATEGORY_GRADIENT["Communication & Understanding"],
   5: HERO_GRADIENT,
 } as const;
 

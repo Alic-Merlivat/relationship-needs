@@ -1,11 +1,14 @@
 import { NEEDS } from "@/data/needs";
 import { fitBradleyTerry, type ComparisonRecord } from "@/lib/bradleyTerry";
+import { MIN_COMPARISONS } from "@/lib/confidence";
 import type { Pair } from "@/lib/pairing";
 
+export { MIN_COMPARISONS };
+
+// Stage boundaries (rounds), configurable — simulation may suggest changes.
+// Discovery: 1-16. Refinement: 17-30. Top-candidate identification: 31-MIN_COMPARISONS.
 const DISCOVERY_ROUNDS = 16;
 const REFINEMENT_ROUNDS = 14;
-const FINAL_ROUNDS = 10;
-export const TOTAL_COMPARISONS = DISCOVERY_ROUNDS + REFINEMENT_ROUNDS + FINAL_ROUNDS;
 
 const RECENCY_WINDOW = 3;
 const EXPOSURE_CAP_REFINEMENT = 6;
@@ -15,6 +18,15 @@ const BOUNDARY_RANK_MAX = 17;
 const BOUNDARY_BOOST = 1.5;
 /** Optimism bonus (in SE units) applied when deciding final-stage pool eligibility. */
 const POOL_UCB_C = 1.0;
+
+// Confidence-refinement stage (41-60): tighter pool, stronger focus on the
+// #3/#4 boundary specifically, since that's the only thing still undecided.
+const TOP_N_POOL_CONFIDENCE = 10;
+const CONFIDENCE_BOUNDARY_RANK_MIN = 1; // 0-indexed rank 1 (displayed #2)
+const CONFIDENCE_BOUNDARY_RANK_MAX = 4; // 0-indexed rank 4 (displayed #5)
+const CONFIDENCE_BOUNDARY_BOOST = 1.8;
+const CONFIDENCE_TOP8_RANK_MAX = 7; // 0-indexed rank 7 (displayed #8)
+const CONFIDENCE_TOP8_BOOST = 1.3;
 
 const CATEGORY_OF: Record<string, string> = Object.fromEntries(
   NEEDS.map((n) => [n.id, n.category])
@@ -207,15 +219,86 @@ function selectFinalPair(ids: string[], history: ComparisonRecord[]): Pair {
 }
 
 /**
+ * Rounds 41-60 (only reached if the assessment didn't already stop at 40):
+ * the ranking question is settled for everything except the Top 3 boundary.
+ * Pool shrinks to the current Top 10, and scoring leans hard into the #3/#4
+ * region specifically — this is a distinct objective from the 31-40 stage
+ * (which still cares about the whole #8-15 boundary), so it gets its own
+ * strategy rather than reusing/overloading selectFinalPair.
+ */
+function selectConfidenceRefinementPair(ids: string[], history: ComparisonRecord[]): Pair {
+  const used = buildUsedPairs(history);
+  const recent = buildRecent(history, RECENCY_WINDOW);
+  const fit = fitBradleyTerry(ids, history);
+  const ranked = [...ids].sort((a, b) => fit.strength[b] - fit.strength[a]);
+  const rankIndex = new Map(ranked.map((id, i) => [id, i]));
+
+  // Same UCB-style optimism as the 31-40 stage's pool: a genuinely strong
+  // need that took one early unlucky loss (high SE, dented point estimate)
+  // must not get permanently excluded from these last, most-consequential
+  // rounds before it's had a fair chance to be retested.
+  const poolRanked = [...ids].sort(
+    (a, b) =>
+      fit.strength[b] + POOL_UCB_C * fit.se[b] - (fit.strength[a] + POOL_UCB_C * fit.se[a])
+  );
+  const pool = poolRanked.slice(0, Math.min(TOP_N_POOL_CONFIDENCE, poolRanked.length));
+
+  const scoreOf = (a: string, b: string): number => {
+    let score = fit.se[a] + fit.se[b] - Math.abs(fit.strength[a] - fit.strength[b]);
+    const aRank = rankIndex.get(a)!;
+    const bRank = rankIndex.get(b)!;
+    const bothNearBoundary =
+      aRank >= CONFIDENCE_BOUNDARY_RANK_MIN &&
+      aRank <= CONFIDENCE_BOUNDARY_RANK_MAX &&
+      bRank >= CONFIDENCE_BOUNDARY_RANK_MIN &&
+      bRank <= CONFIDENCE_BOUNDARY_RANK_MAX;
+    const bothTop8 = aRank <= CONFIDENCE_TOP8_RANK_MAX && bRank <= CONFIDENCE_TOP8_RANK_MAX;
+    if (bothNearBoundary) score *= CONFIDENCE_BOUNDARY_BOOST;
+    else if (bothTop8) score *= CONFIDENCE_TOP8_BOOST;
+    return score;
+  };
+
+  const tryFind = (opts: { allowRecent: boolean; usePool: boolean }): Pair | null => {
+    const candidates = opts.usePool ? pool : ranked;
+    let best: Pair | null = null;
+    let bestScore = -Infinity;
+    for (let x = 0; x < candidates.length; x++) {
+      const a = candidates[x];
+      if (!opts.allowRecent && recent.has(a)) continue;
+      for (let y = x + 1; y < candidates.length; y++) {
+        const b = candidates[y];
+        if (!opts.allowRecent && recent.has(b)) continue;
+        if (used.has(pairKey(a, b))) continue;
+        const score = scoreOf(a, b);
+        if (score > bestScore) {
+          bestScore = score;
+          best = [a, b];
+        }
+      }
+    }
+    return best;
+  };
+
+  return (
+    tryFind({ allowRecent: false, usePool: true }) ??
+    tryFind({ allowRecent: true, usePool: true }) ??
+    tryFind({ allowRecent: true, usePool: false }) ??
+    fallbackPair(ids, history)
+  );
+}
+
+/**
  * Picks the next comparison pair given everything answered so far. Never
  * repeats an exact pair, avoids re-showing a need within the last few
- * rounds, and moves through three stages as the fixed 40-comparison budget
- * progresses: broad discovery, then closest-strength refinement, then
- * concentrated final-ranking around the top pool and the uncertain boundary.
+ * rounds, and moves through four stages: broad discovery, closest-strength
+ * refinement, top-candidate identification, and — only if the assessment
+ * runs past the 40-comparison minimum — confidence refinement focused on
+ * the Top-3 boundary specifically.
  */
 export function selectNextPair(ids: string[], history: ComparisonRecord[]): Pair {
   const round = history.length + 1;
   if (round <= DISCOVERY_ROUNDS) return selectDiscoveryPair(ids, history);
   if (round <= DISCOVERY_ROUNDS + REFINEMENT_ROUNDS) return selectRefinementPair(ids, history);
-  return selectFinalPair(ids, history);
+  if (round <= MIN_COMPARISONS) return selectFinalPair(ids, history);
+  return selectConfidenceRefinementPair(ids, history);
 }

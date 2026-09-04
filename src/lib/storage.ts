@@ -1,18 +1,42 @@
 import { NEEDS } from "@/data/needs";
-import { selectNextPair, TOTAL_COMPARISONS as ADAPTIVE_TOTAL_COMPARISONS } from "@/lib/adaptivePairing";
+import { selectNextPair } from "@/lib/adaptivePairing";
 import type { ComparisonRecord } from "@/lib/bradleyTerry";
+import {
+  evaluateAssessmentConfidence,
+  EXTENDED_MAX_COMPARISONS,
+  MIN_COMPARISONS,
+  type AssessmentConfidence,
+} from "@/lib/confidence";
 import { buildRanking } from "@/lib/ranking";
 import type { Pair } from "@/lib/pairing";
 
-export const TOTAL_COMPARISONS = ADAPTIVE_TOTAL_COMPARISONS;
+export { MIN_COMPARISONS, EXTENDED_MAX_COMPARISONS };
 
-const ASSESSMENT_KEY = "rn-assessment-state-v2";
-const RESULTS_KEY = "rn-results-v2";
-const PARTNER_RANKS_KEY = "rn-partner-ranks-v2";
+// Bumped for the 9-Core-Need taxonomy: card ids changed, so older blobs
+// reference needs that no longer exist.
+const ASSESSMENT_KEY = "rn-assessment-state-v4";
+const RESULTS_KEY = "rn-results-v3";
+const PARTNER_RANKS_KEY = "rn-partner-ranks-v3";
+
+const KNOWN_NEED_IDS = new Set(NEEDS.map((n) => n.id));
+
+/**
+ * Guards against stored history referencing needs that no longer exist —
+ * downstream ranking assumes every id resolves to a card, so a stale blob
+ * would otherwise crash the results page rather than restart cleanly.
+ */
+function referencesOnlyKnownNeeds(history: ComparisonRecord[]): boolean {
+  return history.every(
+    (record) =>
+      KNOWN_NEED_IDS.has(record?.winnerId) && KNOWN_NEED_IDS.has(record?.loserId)
+  );
+}
 
 export interface AssessmentState {
   history: ComparisonRecord[];
   currentPair: Pair | null;
+  /** Confidence snapshot from the most recent evaluation checkpoint, if any. */
+  confidence: AssessmentConfidence | null;
 }
 
 export function createAssessmentState(): AssessmentState {
@@ -20,10 +44,16 @@ export function createAssessmentState(): AssessmentState {
   return {
     history: [],
     currentPair: selectNextPair(ids, []),
+    confidence: null,
   };
 }
 
-/** Records a choice and picks the next pair, or null once the assessment is complete. */
+/**
+ * Records a choice, then either picks the next pair or stops the
+ * assessment. Stopping is decided by `evaluateAssessmentConfidence` at each
+ * evaluation checkpoint (40, 45, 50, 55, 60) — the assessment never stops
+ * before 40, and always stops by 60 regardless of outcome.
+ */
 export function advanceAssessment(
   state: AssessmentState,
   winnerId: string,
@@ -31,9 +61,14 @@ export function advanceAssessment(
 ): AssessmentState {
   const history = [...state.history, { winnerId, loserId }];
   const ids = NEEDS.map((n) => n.id);
-  const currentPair =
-    history.length >= TOTAL_COMPARISONS ? null : selectNextPair(ids, history);
-  return { history, currentPair };
+
+  let confidence: AssessmentConfidence | null = state.confidence;
+  if (history.length >= MIN_COMPARISONS) {
+    confidence = evaluateAssessmentConfidence(ids, history);
+  }
+
+  const currentPair = confidence?.shouldStop ? null : selectNextPair(ids, history);
+  return { history, currentPair, confidence };
 }
 
 export function loadAssessmentState(): AssessmentState | null {
@@ -43,6 +78,7 @@ export function loadAssessmentState(): AssessmentState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AssessmentState;
     if (!parsed || !Array.isArray(parsed.history)) return null;
+    if (!referencesOnlyKnownNeeds(parsed.history)) return null;
     return parsed;
   } catch {
     return null;
@@ -71,6 +107,7 @@ export function loadResults(): ComparisonRecord[] | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { history?: ComparisonRecord[] };
     if (!parsed || !Array.isArray(parsed.history)) return null;
+    if (!referencesOnlyKnownNeeds(parsed.history)) return null;
     return parsed.history;
   } catch {
     return null;

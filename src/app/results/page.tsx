@@ -2,9 +2,16 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { CATEGORY_EMOJI, NEEDS, type RelationshipNeed } from "@/data/needs";
+import {
+  CATEGORY_EMOJI,
+  CATEGORY_QUESTION,
+  CATEGORY_SHORT_LABEL,
+  NEEDS,
+  type RelationshipNeed,
+} from "@/data/needs";
 import type { ComparisonRecord } from "@/lib/bradleyTerry";
-import { buildRanking, copyFor, extendForTies, type RankedNeedView } from "@/lib/ranking";
+import { buildCoreNeedRanking, type CoreNeedResult } from "@/lib/coreNeeds";
+import { buildRanking, type RankedNeedView } from "@/lib/ranking";
 import {
   clearAssessmentState,
   clearPartnerRanks,
@@ -15,33 +22,17 @@ import {
 } from "@/lib/storage";
 import { CATEGORY_ACCENT, CATEGORY_GRADIENT, HERO_GRADIENT } from "@/lib/theme";
 
+const TOP_CORE_NEEDS_SHOWN = 3;
+
 interface DiffNeed extends RelationshipNeed {
   yourRank: number;
   partnerRank: number;
   gap: number;
 }
 
-function buildBands(list: RankedNeedView[]): RankedNeedView[][] {
-  const bands: RankedNeedView[][] = [];
-  let current: RankedNeedView[] = [];
-  list.forEach((item) => {
-    current.push(item);
-    if (!item.tiedWithNext) {
-      bands.push(current);
-      current = [];
-    }
-  });
-  if (current.length) bands.push(current);
-  return bands;
-}
-
-function rankLabel(band: RankedNeedView[]): string {
-  return band.length > 1 ? `#${band[0].rank}–${band[band.length - 1].rank}` : `#${band[0].rank}`;
-}
-
 export default function ResultsPage() {
   const router = useRouter();
-  const [topTen, setTopTen] = useState<RankedNeedView[] | null>(null);
+  const [coreNeeds, setCoreNeeds] = useState<CoreNeedResult[] | null>(null);
   const [selected, setSelected] = useState<RankedNeedView | null>(null);
   const [history, setHistory] = useState<ComparisonRecord[] | null>(null);
   const [diffs, setDiffs] = useState<DiffNeed[] | null>(null);
@@ -58,13 +49,11 @@ export default function ResultsPage() {
       return;
     }
     setHistory(storedHistory);
-
-    const ranking = buildRanking(storedHistory);
-    setTopTen(extendForTies(ranking, 10));
+    setCoreNeeds(buildCoreNeedRanking(storedHistory));
 
     const partnerRanks = loadPartnerRanks();
     if (partnerRanks) {
-      const yourRankById = new Map(ranking.map((r) => [r.id, r.rank]));
+      const yourRankById = new Map(buildRanking(storedHistory).map((r) => [r.id, r.rank]));
       const diffList = NEEDS.map((need) => {
         const yourRank = yourRankById.get(need.id)!;
         const partnerRank = partnerRanks[need.id] ?? yourRank;
@@ -113,7 +102,7 @@ export default function ResultsPage() {
     }
   }
 
-  if (!topTen) {
+  if (!coreNeeds) {
     return (
       <main className="flex flex-1 items-center justify-center px-6 py-16">
         <p className="text-stone-400">Loading your results...</p>
@@ -121,11 +110,12 @@ export default function ResultsPage() {
     );
   }
 
-  const [heroBand, ...restBands] = buildBands(topTen);
+  const [first, ...others] = coreNeeds.slice(0, TOP_CORE_NEEDS_SHOWN);
+  const remaining = coreNeeds.slice(TOP_CORE_NEEDS_SHOWN);
 
   return (
     <main
-      className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-2 px-4 pt-3"
+      className="mx-auto flex min-h-dvh w-full max-w-sm flex-col gap-3 px-4 pt-3"
       style={{ paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))" }}
     >
       <div className="flex flex-none items-center justify-between">
@@ -137,85 +127,115 @@ export default function ResultsPage() {
           ‹
         </button>
         <h1 className="font-serif text-lg font-semibold text-stone-800">
-          Top Needs
+          What matters most
         </h1>
-        <button
-          onClick={handleRetake}
-          className="text-xs font-medium text-rose-400"
-        >
+        <button onClick={handleRetake} className="text-xs font-medium text-rose-400">
           Retake
         </button>
       </div>
 
-      <div
-        className="flex flex-none flex-col gap-3 rounded-3xl px-4 py-4 text-white shadow-md"
-        style={{ background: HERO_GRADIENT }}
-      >
-        <p className="text-center text-[11px] font-medium uppercase tracking-widest text-white/70">
-          {heroBand.length > 1 ? "Tied for #1 – too close to call" : "#1"}
-        </p>
-        {heroBand.map((need) => (
-          <button
-            key={need.id}
-            onClick={() => setSelected(need)}
-            className="flex flex-col items-center gap-1 text-center transition-transform active:scale-[0.98]"
-          >
-            <span className="font-serif text-lg font-semibold leading-tight">
-              {need.name}
-            </span>
-            <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
-              {CATEGORY_EMOJI[need.category]} {need.category}
-            </span>
-            <span className="text-[11px] leading-snug text-white/85">
-              {copyFor(need.rank, need.evidenceTier)}
-            </span>
-            <span className="text-[10px] text-white/70">
-              Won {need.wins} of {need.appearances} head-to-head
-            </span>
-          </button>
-        ))}
-      </div>
+      <p className="text-center text-xs leading-relaxed text-stone-500">
+        Your choices point most strongly toward these areas of relationship
+        need. The needs inside each one are listed in the order you leaned
+        toward them.
+      </p>
 
-      <ol className="flex flex-col gap-1.5">
-        {restBands.map((band) => (
-          <li
-            key={band[0].id}
-            className="rounded-xl bg-white px-2.5 py-1.5 shadow-sm"
-          >
-            <div className="flex items-center gap-2 pb-0.5">
-              <span className="flex-none rounded-full bg-stone-800 px-2 py-0.5 text-[10px] font-medium text-white">
-                {rankLabel(band)}
-              </span>
-              {band.length > 1 && (
-                <span className="text-[10px] text-stone-400">
-                  Statistically too close to call
-                </span>
-              )}
-            </div>
-            {band.map((need) => (
+      {/* #1 Core Need */}
+      <section
+        className="flex flex-none flex-col gap-3 rounded-3xl px-4 py-5 text-white shadow-md"
+        style={{ background: CATEGORY_GRADIENT[first.category] }}
+      >
+        <div className="flex flex-col items-center gap-1 text-center">
+          <span className="text-[11px] font-medium uppercase tracking-widest text-white/70">
+            Your strongest area
+          </span>
+          <span className="font-serif text-2xl font-semibold leading-tight">
+            {CATEGORY_EMOJI[first.category]} {first.category}
+          </span>
+          <span className="text-[12px] italic leading-snug text-white/85">
+            {CATEGORY_QUESTION[first.category]}
+          </span>
+        </div>
+        <ul className="flex flex-col gap-1">
+          {first.needs.map((need) => (
+            <li key={need.id}>
               <button
-                key={need.id}
                 onClick={() => setSelected(need)}
-                className="flex w-full items-center gap-2 py-1 text-left"
+                className="flex w-full items-center gap-2 rounded-xl bg-white/15 px-3 py-2 text-left transition-transform active:scale-[0.98]"
               >
-                <span
-                  className="h-2 w-2 flex-none rounded-full"
-                  style={{ background: CATEGORY_ACCENT[need.category] }}
-                />
-                <span className="flex-1 truncate text-xs font-medium text-stone-800">
-                  {need.name}
-                </span>
-                <span className="flex-none text-[11px] font-semibold text-stone-400">
-                  {need.wins}-{need.losses}
-                </span>
+                <span className="flex-1 text-sm font-medium">{need.name}</span>
+                <span className="flex-none text-[11px] text-white/60">›</span>
               </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* #2 and #3 Core Needs */}
+      {others.map((core) => (
+        <section
+          key={core.category}
+          className="flex flex-none flex-col gap-2 rounded-2xl bg-white p-4 shadow-sm"
+        >
+          <div className="flex items-baseline gap-2">
+            <span
+              className="flex h-6 w-6 flex-none items-center justify-center rounded-full text-[11px] font-semibold text-white"
+              style={{ background: CATEGORY_ACCENT[core.category] }}
+            >
+              {core.rank}
+            </span>
+            <span className="font-serif text-base font-semibold text-stone-800">
+              {CATEGORY_EMOJI[core.category]} {core.category}
+            </span>
+          </div>
+          <p className="text-[11px] italic leading-snug text-stone-500">
+            {CATEGORY_QUESTION[core.category]}
+          </p>
+          <ul className="flex flex-col gap-1">
+            {core.needs.map((need) => (
+              <li key={need.id}>
+                <button
+                  onClick={() => setSelected(need)}
+                  className="flex w-full items-center gap-2 rounded-lg bg-stone-50 px-2.5 py-1.5 text-left"
+                >
+                  <span
+                    className="h-2 w-2 flex-none rounded-full"
+                    style={{ background: CATEGORY_ACCENT[need.category] }}
+                  />
+                  <span className="flex-1 truncate text-xs font-medium text-stone-800">
+                    {need.name}
+                  </span>
+                  <span className="flex-none text-[11px] text-stone-300">›</span>
+                </button>
+              </li>
             ))}
-          </li>
-        ))}
-      </ol>
+          </ul>
+        </section>
+      ))}
+
+      {/* Everything else, named but not expanded */}
+      <section className="flex flex-none flex-col gap-2 rounded-2xl bg-white p-4 shadow-sm">
+        <p className="text-[11px] font-medium uppercase tracking-widest text-stone-400">
+          Other areas
+        </p>
+        <p className="text-xs leading-relaxed text-stone-500">
+          These mattered less to you in this assessment — not that they
+          don&apos;t matter at all.
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {remaining.map((core) => (
+            <span
+              key={core.category}
+              className="rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-medium text-stone-600"
+            >
+              {CATEGORY_EMOJI[core.category]} {CATEGORY_SHORT_LABEL[core.category]}
+            </span>
+          ))}
+        </div>
+      </section>
 
       {diffs && (
-        <div className="mt-1 flex flex-none flex-col gap-2 rounded-2xl bg-white p-4 shadow-sm">
+        <div className="flex flex-none flex-col gap-2 rounded-2xl bg-white p-4 shadow-sm">
           <p className="text-[11px] font-medium uppercase tracking-widest text-stone-400">
             You vs your partner
           </p>
@@ -250,7 +270,7 @@ export default function ResultsPage() {
       {!diffs && (
         <form
           onSubmit={handleInvite}
-          className="mt-1 flex flex-none flex-col gap-2 rounded-2xl bg-white p-4 shadow-sm"
+          className="flex flex-none flex-col gap-2 rounded-2xl bg-white p-4 shadow-sm"
         >
           <p className="text-[11px] font-medium uppercase tracking-widest text-stone-400">
             Compare with your partner
@@ -316,13 +336,7 @@ export default function ResultsPage() {
             <p className="mt-3 font-serif text-2xl font-semibold leading-tight">
               {selected.name}
             </p>
-            <p className="mt-1 text-xs font-medium uppercase tracking-widest text-white/70">
-              Rank #{selected.rank} · Won {selected.wins} of {selected.appearances}
-            </p>
-            <p className="mt-2 text-sm leading-relaxed text-white/90">
-              {copyFor(selected.rank, selected.evidenceTier)}
-            </p>
-            <p className="mt-4 text-sm leading-relaxed text-white/90">
+            <p className="mt-3 text-sm leading-relaxed text-white/90">
               {selected.description}
             </p>
             <p className="mt-3 text-sm leading-relaxed text-white/80">

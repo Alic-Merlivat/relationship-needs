@@ -44,7 +44,7 @@ export default function Home() {
         <Link
           href="/why"
           className="inline-flex w-full items-center justify-center rounded-full px-8 py-4 text-base font-medium text-white shadow-md transition-transform active:scale-[0.98]"
-          style={{ background: CATEGORY_GRADIENT.Connection }}
+          style={{ background: CATEGORY_GRADIENT["Connection & Togetherness"] }}
         >
           Why the needs assessment exists
         </Link>

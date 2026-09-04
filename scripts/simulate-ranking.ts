@@ -1,10 +1,16 @@
 /**
- * Simulates synthetic users with a known, hidden true preference ranking and
- * measures how reliably each ranking configuration recovers their real top 5
- * and top 10 from a 40-comparison assessment. Compares:
- *   (a) current Elo + current balanced-random pairing (the pre-V2 baseline)
- *   (b) Bradley-Terry scoring + current pairing
- *   (c) Bradley-Terry scoring + new adaptive pairing
+ * Simulates synthetic users with a known, hidden true preference ranking.
+ *
+ * Section 1 reproduces the original fixed-40-comparison comparison between
+ * (a) Elo + old pairing, (b) Bradley-Terry + old pairing, and (c)
+ * Bradley-Terry + adaptive pairing (no early stopping) — kept as a legacy
+ * reference point.
+ *
+ * Section 2 is the actual deliverable for the V2.1 adaptive-length work: a
+ * parameter sweep over the Top-3 stop condition (minimum exposure, the
+ * #3-vs-#4 separation z-threshold), measuring assessment length, recovery
+ * quality, and — most importantly — the false-confidence rate: how often
+ * the algorithm confidently declares a Top 3 that's actually wrong.
  *
  * Run with: npm run simulate
  */
@@ -12,11 +18,18 @@
 import { NEEDS } from "../src/data/needs";
 import { applyEloUpdate, INITIAL_RATING } from "../src/lib/elo";
 import { generatePairs } from "../src/lib/pairing";
-import { fitBradleyTerry, type ComparisonRecord } from "../src/lib/bradleyTerry";
-import { selectNextPair, TOTAL_COMPARISONS } from "../src/lib/adaptivePairing";
+import { computeTieBands, fitBradleyTerry, type ComparisonRecord } from "../src/lib/bradleyTerry";
+import { selectNextPair, MIN_COMPARISONS } from "../src/lib/adaptivePairing";
+import {
+  evaluateAssessmentConfidence,
+  STANDARD_MAX_COMPARISONS,
+  EXTENDED_MAX_COMPARISONS,
+  EVALUATION_CHECKPOINTS,
+  EXTENDED_EVALUATION_CHECKPOINTS,
+  type ConfidenceConfig,
+} from "../src/lib/confidence";
 
 const NEED_IDS = NEEDS.map((n) => n.id);
-const N_TRIALS = 300;
 
 // ---------------------------------------------------------------------------
 // Seeded PRNG (mulberry32) so each trial is exactly reproducible run-to-run.
@@ -82,8 +95,8 @@ const PROFILES: Profile[] = [
     "Category-clustered",
     NEED_IDS.map((id) => {
       const elevated =
-        categoryOf[id] === "Emotional Safety & Trust" ||
-        categoryOf[id] === "Affection & Connection";
+        categoryOf[id] === "Love & Affection" ||
+        categoryOf[id] === "Connection & Togetherness";
       return elevated ? 1.5 + noise(0.3) : 0 + noise(0.3);
     })
   ),
@@ -116,8 +129,37 @@ function simulateChoice(
     : { winnerId: b, loserId: a };
 }
 
+function average(values: number[]): number {
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function kendallTau(trueOrder: string[], computedOrder: string[]): number {
+  const trueRank = new Map(trueOrder.map((id, i) => [id, i]));
+  const compRank = new Map(computedOrder.map((id, i) => [id, i]));
+  let concordant = 0;
+  let discordant = 0;
+  for (let i = 0; i < trueOrder.length; i++) {
+    for (let j = i + 1; j < trueOrder.length; j++) {
+      const a = trueOrder[i];
+      const b = trueOrder[j];
+      const trueSign = Math.sign(trueRank.get(a)! - trueRank.get(b)!);
+      const compSign = Math.sign(compRank.get(a)! - compRank.get(b)!);
+      if (trueSign === compSign) concordant++;
+      else discordant++;
+    }
+  }
+  const total = concordant + discordant;
+  return total === 0 ? 1 : (concordant - discordant) / total;
+}
+
 // ---------------------------------------------------------------------------
-// Configurations under test
+// Section 1: legacy fixed-40 comparison (Elo vs BT, old vs adaptive pairing)
 // ---------------------------------------------------------------------------
 
 function runConfigA(trueStrength: Record<string, number>): string[] {
@@ -148,7 +190,7 @@ function runConfigB(trueStrength: Record<string, number>): string[] {
 function runConfigC(trueStrength: Record<string, number>): string[] {
   const ids = [...NEED_IDS];
   const history: ComparisonRecord[] = [];
-  for (let round = 0; round < TOTAL_COMPARISONS; round++) {
+  for (let round = 0; round < MIN_COMPARISONS; round++) {
     const [a, b] = selectNextPair(ids, history);
     history.push(simulateChoice(trueStrength, a, b));
   }
@@ -156,52 +198,24 @@ function runConfigC(trueStrength: Record<string, number>): string[] {
   return [...ids].sort((x, y) => fit.strength[y] - fit.strength[x]);
 }
 
-const CONFIGS: { name: string; run: (trueStrength: Record<string, number>) => string[] }[] = [
-  { name: "(a) Elo + current pairing", run: runConfigA },
-  { name: "(b) Bradley-Terry + current pairing", run: runConfigB },
-  { name: "(c) Bradley-Terry + adaptive pairing", run: runConfigC },
+const LEGACY_CONFIGS: { name: string; run: (trueStrength: Record<string, number>) => string[] }[] = [
+  { name: "(a) Elo + old pairing", run: runConfigA },
+  { name: "(b) Bradley-Terry + old pairing", run: runConfigB },
+  { name: "(c) Bradley-Terry + adaptive pairing (fixed 40)", run: runConfigC },
 ];
 
-// ---------------------------------------------------------------------------
-// Metrics
-// ---------------------------------------------------------------------------
-
-function kendallTau(trueOrder: string[], computedOrder: string[]): number {
-  const trueRank = new Map(trueOrder.map((id, i) => [id, i]));
-  const compRank = new Map(computedOrder.map((id, i) => [id, i]));
-  let concordant = 0;
-  let discordant = 0;
-  for (let i = 0; i < trueOrder.length; i++) {
-    for (let j = i + 1; j < trueOrder.length; j++) {
-      const a = trueOrder[i];
-      const b = trueOrder[j];
-      const trueSign = Math.sign(trueRank.get(a)! - trueRank.get(b)!);
-      const compSign = Math.sign(compRank.get(a)! - compRank.get(b)!);
-      if (trueSign === compSign) concordant++;
-      else discordant++;
-    }
-  }
-  const total = concordant + discordant;
-  return total === 0 ? 1 : (concordant - discordant) / total;
-}
-
-interface TrialMetrics {
-  top5ExactMatch: number;
+interface RankingMetrics {
   top5Overlap: number;
-  top10ExactMatch: number;
   top10Overlap: number;
   kendallTau: number;
   meanAbsRankErrorTop10: number;
 }
 
-function computeMetrics(trueOrder: string[], computedOrder: string[]): TrialMetrics {
+function computeRankingMetrics(trueOrder: string[], computedOrder: string[]): RankingMetrics {
   const trueTop5 = trueOrder.slice(0, 5);
   const trueTop10 = trueOrder.slice(0, 10);
   const compTop5 = new Set(computedOrder.slice(0, 5));
   const compTop10 = new Set(computedOrder.slice(0, 10));
-
-  const top5Overlap = trueTop5.filter((id) => compTop5.has(id)).length;
-  const top10Overlap = trueTop10.filter((id) => compTop10.has(id)).length;
 
   const trueRank = new Map(trueOrder.map((id, i) => [id, i + 1]));
   const compRank = new Map(computedOrder.map((id, i) => [id, i + 1]));
@@ -210,70 +224,383 @@ function computeMetrics(trueOrder: string[], computedOrder: string[]): TrialMetr
     trueTop10.length;
 
   return {
-    top5ExactMatch: top5Overlap === 5 ? 1 : 0,
-    top5Overlap,
-    top10ExactMatch: top10Overlap === 10 ? 1 : 0,
-    top10Overlap,
+    top5Overlap: trueTop5.filter((id) => compTop5.has(id)).length,
+    top10Overlap: trueTop10.filter((id) => compTop10.has(id)).length,
     kendallTau: kendallTau(trueOrder, computedOrder),
     meanAbsRankErrorTop10,
   };
 }
 
-function average(values: number[]): number {
-  return values.reduce((a, b) => a + b, 0) / values.length;
+const N_TRIALS_LEGACY = 300;
+
+function runLegacySection(): void {
+  console.log("\n\n########## SECTION 1: legacy fixed-40 comparison ##########");
+
+  const aggregate: Record<string, RankingMetrics[]> = Object.fromEntries(
+    LEGACY_CONFIGS.map((c) => [c.name, []])
+  );
+
+  for (let profileIndex = 0; profileIndex < PROFILES.length; profileIndex++) {
+    const profile = PROFILES[profileIndex];
+    const trueOrder = [...NEED_IDS].sort(
+      (a, b) => profile.trueStrength[b] - profile.trueStrength[a]
+    );
+
+    console.log(`\n=== Profile: ${profile.name} ===`);
+    const rows: Record<string, unknown>[] = [];
+
+    for (const config of LEGACY_CONFIGS) {
+      const trials: RankingMetrics[] = [];
+      for (let trial = 0; trial < N_TRIALS_LEGACY; trial++) {
+        const seed = profileIndex * 100000 + trial;
+        const computedOrder = withSeed(seed, () => config.run(profile.trueStrength));
+        trials.push(computeRankingMetrics(trueOrder, computedOrder));
+      }
+      aggregate[config.name].push(...trials);
+
+      rows.push({
+        Configuration: config.name,
+        "Top-5 avg overlap (/5)": average(trials.map((t) => t.top5Overlap)).toFixed(2),
+        "Top-10 avg overlap (/10)": average(trials.map((t) => t.top10Overlap)).toFixed(2),
+        "Kendall's tau": average(trials.map((t) => t.kendallTau)).toFixed(3),
+        "Mean |rank error| (top 10)": average(trials.map((t) => t.meanAbsRankErrorTop10)).toFixed(2),
+      });
+    }
+
+    console.table(rows);
+  }
+
+  console.log(`\n=== Section 1 aggregate across all ${PROFILES.length} profiles (${N_TRIALS_LEGACY} trials each) ===`);
+  const aggregateRows = LEGACY_CONFIGS.map((config) => {
+    const trials = aggregate[config.name];
+    return {
+      Configuration: config.name,
+      "Top-5 avg overlap (/5)": average(trials.map((t) => t.top5Overlap)).toFixed(2),
+      "Top-10 avg overlap (/10)": average(trials.map((t) => t.top10Overlap)).toFixed(2),
+      "Kendall's tau": average(trials.map((t) => t.kendallTau)).toFixed(3),
+      "Mean |rank error| (top 10)": average(trials.map((t) => t.meanAbsRankErrorTop10)).toFixed(2),
+    };
+  });
+  console.table(aggregateRows);
+}
+
+// ---------------------------------------------------------------------------
+// Section 2: adaptive stopping parameter sweep
+// ---------------------------------------------------------------------------
+
+const N_TRIALS_ADAPTIVE = 50;
+
+const MIN_EXPOSURE_GRID = [2, 4];
+const Z_THRESHOLD_GRID = [0.3, 0.5, 0.8, 1.0, 1.2, 1.5, 1.8];
+const STABILITY_CHECKPOINTS_REQUIRED = 2; // fixed per spec's example; not swept
+
+interface AdaptiveTrialResult {
+  stopCount: number;
+  resultType: "CLEAR_TOP3" | "CLUSTERED_TOP" | "CONTINUE";
+  topCandidates: string[];
+  finalOrder: string[];
+}
+
+function runAdaptiveTrial(
+  ids: string[],
+  trueStrength: Record<string, number>,
+  config: ConfidenceConfig
+): AdaptiveTrialResult {
+  const history: ComparisonRecord[] = [];
+  for (let round = 1; round <= config.maxComparisons; round++) {
+    const [a, b] = selectNextPair(ids, history);
+    history.push(simulateChoice(trueStrength, a, b));
+
+    if (config.evaluationCheckpoints.includes(history.length)) {
+      const confidence = evaluateAssessmentConfidence(ids, history, config);
+      if (confidence.shouldStop) {
+        const fit = fitBradleyTerry(ids, history);
+        const finalOrder = [...ids].sort((x, y) => fit.strength[y] - fit.strength[x]);
+        return {
+          stopCount: history.length,
+          resultType: confidence.resultType,
+          topCandidates: confidence.topCandidates,
+          finalOrder,
+        };
+      }
+    }
+  }
+  // Defensive fallback — evaluateAssessmentConfidence always forces a stop at
+  // config.maxComparisons, so this should be unreachable.
+  const fit = fitBradleyTerry(ids, history);
+  const finalOrder = [...ids].sort((x, y) => fit.strength[y] - fit.strength[x]);
+  return { stopCount: history.length, resultType: "CLUSTERED_TOP", topCandidates: finalOrder.slice(0, 3), finalOrder };
+}
+
+interface AdaptiveAggregate {
+  minExposure: number;
+  zThreshold: number;
+  avgStop: number;
+  medianStop: number;
+  pctByCheckpoint: Record<number, number>;
+  pctClustered: number;
+  top3ExactRecoveryRate: number;
+  falseConfidenceRate: number;
+  top3MembershipOverlap: number;
+  top5Overlap: number;
+  top10Overlap: number;
+  kendallTau: number;
+  meanAbsRankErrorTop10: number;
+}
+
+function runAdaptiveSweep(): AdaptiveAggregate[] {
+  console.log("\n\n########## SECTION 2: adaptive stopping parameter sweep ##########");
+
+  const results: AdaptiveAggregate[] = [];
+  const totalConfigs = MIN_EXPOSURE_GRID.length * Z_THRESHOLD_GRID.length;
+  let configIndex = 0;
+  const startTime = Date.now();
+
+  for (const minExposure of MIN_EXPOSURE_GRID) {
+    for (const zThreshold of Z_THRESHOLD_GRID) {
+      configIndex++;
+      const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(0);
+      console.log(
+        `\n[${configIndex}/${totalConfigs}] minExposure=${minExposure} zThreshold=${zThreshold} (elapsed ${elapsedSec}s)`
+      );
+
+      // No extension in this sweep — standard and hard ceiling are the same
+      // (60), reproducing the original "hard 60-comparison cap" behavior.
+      const config: ConfidenceConfig = {
+        minExposure,
+        separationZThreshold: zThreshold,
+        stabilityCheckpointsRequired: STABILITY_CHECKPOINTS_REQUIRED,
+        evaluationCheckpoints: EVALUATION_CHECKPOINTS,
+        standardMaxComparisons: STANDARD_MAX_COMPARISONS,
+        maxComparisons: STANDARD_MAX_COMPARISONS,
+      };
+
+      const stopCounts: number[] = [];
+      const checkpointCounts: Record<number, number> = Object.fromEntries(
+        EVALUATION_CHECKPOINTS.map((c) => [c, 0])
+      );
+      let clusteredCount = 0;
+      let exactRecoveryCount = 0;
+      let falseConfidenceCount = 0;
+      const top3OverlapValues: number[] = [];
+      const rankingMetricsAll: RankingMetrics[] = [];
+      let totalTrials = 0;
+
+      for (let profileIndex = 0; profileIndex < PROFILES.length; profileIndex++) {
+        const profile = PROFILES[profileIndex];
+        const trueOrder = [...NEED_IDS].sort(
+          (a, b) => profile.trueStrength[b] - profile.trueStrength[a]
+        );
+        const trueTop3 = new Set(trueOrder.slice(0, 3));
+
+        for (let trial = 0; trial < N_TRIALS_ADAPTIVE; trial++) {
+          const seed = profileIndex * 100000 + trial;
+          const result = withSeed(seed, () =>
+            runAdaptiveTrial([...NEED_IDS], profile.trueStrength, config)
+          );
+          totalTrials++;
+
+          stopCounts.push(result.stopCount);
+          checkpointCounts[result.stopCount] = (checkpointCounts[result.stopCount] ?? 0) + 1;
+          if (result.resultType === "CLUSTERED_TOP") clusteredCount++;
+
+          const overlap = result.topCandidates.filter((id) => trueTop3.has(id)).length;
+          top3OverlapValues.push(overlap);
+
+          if (result.resultType === "CLEAR_TOP3") {
+            if (overlap === 3) exactRecoveryCount++;
+            else falseConfidenceCount++;
+          }
+
+          rankingMetricsAll.push(computeRankingMetrics(trueOrder, result.finalOrder));
+        }
+      }
+
+      const pctByCheckpoint: Record<number, number> = {};
+      for (const checkpoint of EVALUATION_CHECKPOINTS) {
+        pctByCheckpoint[checkpoint] = (checkpointCounts[checkpoint] / totalTrials) * 100;
+      }
+
+      results.push({
+        minExposure,
+        zThreshold,
+        avgStop: average(stopCounts),
+        medianStop: median(stopCounts),
+        pctByCheckpoint,
+        pctClustered: (clusteredCount / totalTrials) * 100,
+        top3ExactRecoveryRate: (exactRecoveryCount / totalTrials) * 100,
+        falseConfidenceRate: (falseConfidenceCount / totalTrials) * 100,
+        top3MembershipOverlap: average(top3OverlapValues),
+        top5Overlap: average(rankingMetricsAll.map((m) => m.top5Overlap)),
+        top10Overlap: average(rankingMetricsAll.map((m) => m.top10Overlap)),
+        kendallTau: average(rankingMetricsAll.map((m) => m.kendallTau)),
+        meanAbsRankErrorTop10: average(rankingMetricsAll.map((m) => m.meanAbsRankErrorTop10)),
+      });
+    }
+  }
+
+  return results;
+}
+
+function printAdaptiveResults(results: AdaptiveAggregate[]): void {
+  const rows = results.map((r) => ({
+    "Min exposure": r.minExposure,
+    "Z threshold": r.zThreshold,
+    "Avg stop": r.avgStop.toFixed(1),
+    "Median stop": r.medianStop.toFixed(0),
+    "% @40": r.pctByCheckpoint[40].toFixed(0),
+    "% @45": r.pctByCheckpoint[45].toFixed(0),
+    "% @50": r.pctByCheckpoint[50].toFixed(0),
+    "% @55": r.pctByCheckpoint[55].toFixed(0),
+    "% @60": r.pctByCheckpoint[60].toFixed(0),
+    "% clustered (no clear top3)": r.pctClustered.toFixed(1),
+    "Top3 exact recovery %": r.top3ExactRecoveryRate.toFixed(1),
+    "FALSE CONFIDENCE %": r.falseConfidenceRate.toFixed(1),
+    "Top3 membership overlap (/3)": r.top3MembershipOverlap.toFixed(2),
+    "Top5 overlap (/5)": r.top5Overlap.toFixed(2),
+    "Top10 overlap (/10)": r.top10Overlap.toFixed(2),
+    "Kendall's tau": r.kendallTau.toFixed(3),
+    "Mean |rank error| top10": r.meanAbsRankErrorTop10.toFixed(2),
+  }));
+  console.table(rows);
+}
+
+// ---------------------------------------------------------------------------
+// Section 3: tied-for-#1 extension analysis
+//
+// At the recommended base config, how often is #1 itself still tied at the
+// standard 60-comparison ceiling, how many extra comparisons does resolving
+// it actually cost, and does extending the ceiling actually resolve the tie
+// (vs just burning more comparisons without ever separating #1)?
+// ---------------------------------------------------------------------------
+
+const RECOMMENDED_MIN_EXPOSURE = 3;
+const RECOMMENDED_Z_THRESHOLD = 1.0;
+const EXTENDED_CAP_GRID = [70, 80, 100];
+const N_TRIALS_EXTENSION = 50;
+
+function extendedCheckpointsUpTo(cap: number): number[] {
+  return [...EVALUATION_CHECKPOINTS, ...EXTENDED_EVALUATION_CHECKPOINTS.filter((c) => c <= cap)];
+}
+
+interface ExtensionAggregate {
+  extendedCap: number;
+  pctNeededExtension: number;
+  avgExtraComparisonsIfNeeded: number;
+  pctTieResolvedAmongExtended: number;
+  avgStopOverall: number;
+  top3ExactRecoveryRate: number;
+  falseConfidenceRate: number;
+}
+
+function runExtensionAnalysis(): ExtensionAggregate[] {
+  console.log("\n\n########## SECTION 3: tied-for-#1 extension analysis ##########");
+  console.log(
+    `Base config: minExposure=${RECOMMENDED_MIN_EXPOSURE}, zThreshold=${RECOMMENDED_Z_THRESHOLD}, stability=${STABILITY_CHECKPOINTS_REQUIRED}\n`
+  );
+
+  const results: ExtensionAggregate[] = [];
+
+  for (const extendedCap of EXTENDED_CAP_GRID) {
+    const config: ConfidenceConfig = {
+      minExposure: RECOMMENDED_MIN_EXPOSURE,
+      separationZThreshold: RECOMMENDED_Z_THRESHOLD,
+      stabilityCheckpointsRequired: STABILITY_CHECKPOINTS_REQUIRED,
+      evaluationCheckpoints: extendedCheckpointsUpTo(extendedCap),
+      standardMaxComparisons: STANDARD_MAX_COMPARISONS,
+      maxComparisons: extendedCap,
+    };
+
+    const stopCounts: number[] = [];
+    const extraComparisonsIfNeeded: number[] = [];
+    let neededExtensionCount = 0;
+    let tieResolvedCount = 0;
+    let exactRecoveryCount = 0;
+    let falseConfidenceCount = 0;
+    let totalTrials = 0;
+
+    for (let profileIndex = 0; profileIndex < PROFILES.length; profileIndex++) {
+      const profile = PROFILES[profileIndex];
+      const trueTop3 = new Set(
+        [...NEED_IDS].sort((a, b) => profile.trueStrength[b] - profile.trueStrength[a]).slice(0, 3)
+      );
+
+      for (let trial = 0; trial < N_TRIALS_EXTENSION; trial++) {
+        const seed = profileIndex * 100000 + trial;
+        const result = withSeed(seed, () =>
+          runAdaptiveTrial([...NEED_IDS], profile.trueStrength, config)
+        );
+        totalTrials++;
+        stopCounts.push(result.stopCount);
+
+        const neededExtension = result.stopCount > STANDARD_MAX_COMPARISONS;
+        if (neededExtension) {
+          neededExtensionCount++;
+          extraComparisonsIfNeeded.push(result.stopCount - STANDARD_MAX_COMPARISONS);
+          const tieStillUnresolved =
+            result.resultType === "CLUSTERED_TOP" && result.topCandidates.length > 1;
+          if (!tieStillUnresolved) tieResolvedCount++;
+        }
+
+        const overlap = result.topCandidates.filter((id) => trueTop3.has(id)).length;
+        if (result.resultType === "CLEAR_TOP3") {
+          if (overlap === 3) exactRecoveryCount++;
+          else falseConfidenceCount++;
+        }
+      }
+    }
+
+    results.push({
+      extendedCap,
+      pctNeededExtension: (neededExtensionCount / totalTrials) * 100,
+      avgExtraComparisonsIfNeeded:
+        extraComparisonsIfNeeded.length > 0 ? average(extraComparisonsIfNeeded) : 0,
+      pctTieResolvedAmongExtended:
+        neededExtensionCount > 0 ? (tieResolvedCount / neededExtensionCount) * 100 : 0,
+      avgStopOverall: average(stopCounts),
+      top3ExactRecoveryRate: (exactRecoveryCount / totalTrials) * 100,
+      falseConfidenceRate: (falseConfidenceCount / totalTrials) * 100,
+    });
+  }
+
+  return results;
+}
+
+function printExtensionResults(results: ExtensionAggregate[]): void {
+  const rows = results.map((r) => ({
+    "Extended cap": r.extendedCap,
+    "% trials needing extension (tied @60)": r.pctNeededExtension.toFixed(1),
+    "Avg extra comparisons (if needed)": r.avgExtraComparisonsIfNeeded.toFixed(1),
+    "% of those where tie resolved": r.pctTieResolvedAmongExtended.toFixed(1),
+    "Avg stop overall": r.avgStopOverall.toFixed(1),
+    "Top3 exact recovery %": r.top3ExactRecoveryRate.toFixed(1),
+    "FALSE CONFIDENCE %": r.falseConfidenceRate.toFixed(1),
+  }));
+  console.table(rows);
 }
 
 // ---------------------------------------------------------------------------
 // Run
 // ---------------------------------------------------------------------------
 
-const aggregate: Record<string, TrialMetrics[]> = Object.fromEntries(
-  CONFIGS.map((c) => [c.name, []])
+runLegacySection();
+const adaptiveResults = runAdaptiveSweep();
+console.log(
+  `\n=== Section 2: adaptive stopping sweep (${MIN_EXPOSURE_GRID.length}×${Z_THRESHOLD_GRID.length} configs, ${N_TRIALS_ADAPTIVE} trials/profile, ${PROFILES.length} profiles, stability=${STABILITY_CHECKPOINTS_REQUIRED}) ===`
+);
+printAdaptiveResults(adaptiveResults);
+
+const zeroFalseConfidence = adaptiveResults.filter((r) => r.falseConfidenceRate === 0);
+const candidatePool = zeroFalseConfidence.length > 0 ? zeroFalseConfidence : adaptiveResults;
+const best = [...candidatePool].sort((a, b) => {
+  if (a.falseConfidenceRate !== b.falseConfidenceRate) return a.falseConfidenceRate - b.falseConfidenceRate;
+  if (b.top3ExactRecoveryRate !== a.top3ExactRecoveryRate) return b.top3ExactRecoveryRate - a.top3ExactRecoveryRate;
+  return a.avgStop - b.avgStop;
+})[0];
+console.log(
+  `\nLowest-false-confidence / best-recovery config found: minExposure=${best.minExposure}, zThreshold=${best.zThreshold} ` +
+    `(false confidence ${best.falseConfidenceRate.toFixed(1)}%, exact recovery ${best.top3ExactRecoveryRate.toFixed(1)}%, avg stop ${best.avgStop.toFixed(1)})`
 );
 
-for (let profileIndex = 0; profileIndex < PROFILES.length; profileIndex++) {
-  const profile = PROFILES[profileIndex];
-  const trueOrder = [...NEED_IDS].sort(
-    (a, b) => profile.trueStrength[b] - profile.trueStrength[a]
-  );
-
-  console.log(`\n=== Profile: ${profile.name} ===`);
-  const rows: Record<string, unknown>[] = [];
-
-  for (const config of CONFIGS) {
-    const trials: TrialMetrics[] = [];
-    for (let trial = 0; trial < N_TRIALS; trial++) {
-      const seed = profileIndex * 100000 + trial;
-      const computedOrder = withSeed(seed, () => config.run(profile.trueStrength));
-      trials.push(computeMetrics(trueOrder, computedOrder));
-    }
-    aggregate[config.name].push(...trials);
-
-    rows.push({
-      Configuration: config.name,
-      "Top-5 exact match": `${(average(trials.map((t) => t.top5ExactMatch)) * 100).toFixed(1)}%`,
-      "Top-5 avg overlap (/5)": average(trials.map((t) => t.top5Overlap)).toFixed(2),
-      "Top-10 exact match": `${(average(trials.map((t) => t.top10ExactMatch)) * 100).toFixed(1)}%`,
-      "Top-10 avg overlap (/10)": average(trials.map((t) => t.top10Overlap)).toFixed(2),
-      "Kendall's tau": average(trials.map((t) => t.kendallTau)).toFixed(3),
-      "Mean |rank error| (top 10)": average(trials.map((t) => t.meanAbsRankErrorTop10)).toFixed(2),
-    });
-  }
-
-  console.table(rows);
-}
-
-console.log(`\n=== Aggregate across all ${PROFILES.length} profiles (${N_TRIALS} trials each) ===`);
-const aggregateRows = CONFIGS.map((config) => {
-  const trials = aggregate[config.name];
-  return {
-    Configuration: config.name,
-    "Top-5 exact match": `${(average(trials.map((t) => t.top5ExactMatch)) * 100).toFixed(1)}%`,
-    "Top-5 avg overlap (/5)": average(trials.map((t) => t.top5Overlap)).toFixed(2),
-    "Top-10 exact match": `${(average(trials.map((t) => t.top10ExactMatch)) * 100).toFixed(1)}%`,
-    "Top-10 avg overlap (/10)": average(trials.map((t) => t.top10Overlap)).toFixed(2),
-    "Kendall's tau": average(trials.map((t) => t.kendallTau)).toFixed(3),
-    "Mean |rank error| (top 10)": average(trials.map((t) => t.meanAbsRankErrorTop10)).toFixed(2),
-  };
-});
-console.table(aggregateRows);
+const extensionResults = runExtensionAnalysis();
+printExtensionResults(extensionResults);

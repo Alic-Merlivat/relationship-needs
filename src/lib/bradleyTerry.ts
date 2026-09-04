@@ -196,3 +196,39 @@ export function zScoreBetween(
   const seDiff = Math.sqrt(Math.max(variance, 1e-9));
   return (result.strength[idA] - result.strength[idB]) / seDiff;
 }
+
+/**
+ * Groups ids (best strength first) into statistical tie bands. Each band is
+ * anchored to its own top member — every other member must be
+ * indistinguishable (z < threshold) from that anchor specifically, not just
+ * from its immediate neighbor — so a long run of individually-small gaps
+ * can't silently chain a clear leader together with a barely-tested need at
+ * the bottom of the band. Reused by both the results display (with
+ * TIE_Z_THRESHOLD) and the stop-condition "leading cluster" (with whatever
+ * separation threshold that decision is using).
+ */
+export function computeTieBands(
+  ids: string[],
+  fit: BradleyTerryResult,
+  threshold: number
+): string[][] {
+  const sorted = [...ids].sort((a, b) => fit.strength[b] - fit.strength[a]);
+  if (sorted.length === 0) return [];
+
+  const bands: string[][] = [];
+  let currentBand: string[] = [sorted[0]];
+  let anchorId = sorted[0];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const id = sorted[i];
+    if (zScoreBetween(fit, anchorId, id) < threshold) {
+      currentBand.push(id);
+    } else {
+      bands.push(currentBand);
+      currentBand = [id];
+      anchorId = id;
+    }
+  }
+  bands.push(currentBand);
+  return bands;
+}
