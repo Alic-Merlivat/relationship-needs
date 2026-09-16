@@ -6,6 +6,7 @@ import {
   clearAssessmentState,
   clearPartnerRanks,
   clearResults,
+  clearSelection,
   savePendingInvite,
 } from "@/lib/storage";
 import { HERO_GRADIENT } from "@/lib/theme";
@@ -40,7 +41,8 @@ export function InviteLanding({
     clearAssessmentState();
     clearResults();
     clearPartnerRanks();
-    router.push("/assessment");
+    clearSelection();
+    router.push("/select");
   }
 
   async function decline() {

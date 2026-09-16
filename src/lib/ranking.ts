@@ -32,8 +32,10 @@ const needsById = new Map<string, RelationshipNeed>(NEEDS.map((n) => [n.id, n]))
  * record) into the same "too close to call" band as a need with zero
  * comparisons.
  */
-export function buildRanking(history: ComparisonRecord[]): RankedNeedView[] {
-  const ids = NEEDS.map((n) => n.id);
+export function buildRanking(
+  history: ComparisonRecord[],
+  ids: string[] = NEEDS.map((n) => n.id)
+): RankedNeedView[] {
   const fit = fitBradleyTerry(ids, history);
   const bands = computeTieBands(ids, fit, TIE_Z_THRESHOLD);
 

@@ -27,14 +27,14 @@ export default function Home() {
       </div>
 
       <p className="text-base leading-relaxed text-stone-600">
-        You&apos;ll be shown two relationship needs at a time and asked a
-        simple question: if you could have more of only one, which would you
-        choose?
+        First you&apos;ll choose the ten needs that matter most to you. Then,
+        two at a time, you&apos;ll answer one simple question: if you could
+        have more of only one, which would you choose?
       </p>
 
       <div className="flex w-full flex-col gap-3">
         <Link
-          href="/assessment"
+          href="/select"
           className="inline-flex w-full items-center justify-center rounded-full px-8 py-4 text-base font-medium text-white shadow-md transition-transform active:scale-[0.98]"
           style={{ background: HERO_GRADIENT }}
         >

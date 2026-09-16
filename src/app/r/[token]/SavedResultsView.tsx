@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { CoreNeedResults } from "@/components/CoreNeedResults";
+import { RankedNeedResults } from "@/components/RankedNeedResults";
 import type { ComparisonRecord } from "@/lib/bradleyTerry";
 import type { InvitationStatus } from "@/lib/db/schema";
 
 interface Props {
   token: string;
   history: ComparisonRecord[];
+  selectedIds: string[];
   name: string;
   partnerName: string | null;
   invitation: { email: string; status: InvitationStatus } | null;
@@ -18,6 +19,7 @@ interface Props {
 export function SavedResultsView({
   token,
   history,
+  selectedIds,
   name,
   partnerName,
   invitation,
@@ -73,7 +75,7 @@ export function SavedResultsView({
         <span className="w-8" />
       </div>
 
-      <CoreNeedResults history={history} />
+      <RankedNeedResults history={history} selectedIds={selectedIds} />
 
       {partnerName && (
         <Link

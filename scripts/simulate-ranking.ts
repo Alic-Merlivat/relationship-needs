@@ -19,7 +19,12 @@ import { NEEDS } from "../src/data/needs";
 import { applyEloUpdate, INITIAL_RATING } from "../src/lib/elo";
 import { generatePairs } from "../src/lib/pairing";
 import { computeTieBands, fitBradleyTerry, type ComparisonRecord } from "../src/lib/bradleyTerry";
-import { selectNextPair, MIN_COMPARISONS } from "../src/lib/adaptivePairing";
+// NOTE: this harness models the original flow — all 46 needs, adaptive
+// stopping between 40 and 80 comparisons. The live app now ranks a
+// self-chosen 10 over a fixed 36, so these numbers describe the old design.
+// `simulate-selected.ts` covers the shipped flow.
+import { selectNextPair } from "../src/lib/adaptivePairing";
+import { MIN_COMPARISONS } from "../src/lib/confidence";
 import {
   evaluateAssessmentConfidence,
   STANDARD_MAX_COMPARISONS,

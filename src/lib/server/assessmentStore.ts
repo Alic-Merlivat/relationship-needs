@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { NEEDS, TAXONOMY_VERSION } from "@/data/needs";
 import type { ComparisonRecord } from "@/lib/bradleyTerry";
-import { MIN_COMPARISONS, EXTENDED_MAX_COMPARISONS } from "@/lib/confidence";
+import { COMPARISON_COUNT, parseSelection } from "@/lib/selection";
 import { getDb } from "@/lib/db/client";
 import {
   accessTokens,
@@ -34,9 +34,7 @@ export const MAX_NAME_LENGTH = 60;
  */
 export function parseHistory(value: unknown): ComparisonRecord[] | null {
   if (!Array.isArray(value)) return null;
-  if (value.length < MIN_COMPARISONS || value.length > EXTENDED_MAX_COMPARISONS) {
-    return null;
-  }
+  if (value.length !== COMPARISON_COUNT) return null;
   const history: ComparisonRecord[] = [];
   for (const entry of value) {
     const winnerId = (entry as ComparisonRecord)?.winnerId;
@@ -47,6 +45,27 @@ export function parseHistory(value: unknown): ComparisonRecord[] | null {
     history.push({ winnerId, loserId });
   }
   return history;
+}
+
+/**
+ * Validates a submitted selection and checks the history was actually
+ * produced by it.
+ *
+ * A history mentioning a need outside the selection means the two don't
+ * belong together — either a stale client or a forged payload — and storing
+ * that pair would produce a ranking nobody generated.
+ */
+export function parseSelectedNeeds(
+  value: unknown,
+  history: ComparisonRecord[]
+): string[] | null {
+  const selected = parseSelection(value);
+  if (!selected) return null;
+  const set = new Set(selected);
+  const consistent = history.every(
+    (r) => set.has(r.winnerId) && set.has(r.loserId)
+  );
+  return consistent ? selected : null;
 }
 
 export function parseName(value: unknown): string | null {
@@ -61,6 +80,7 @@ export async function createAssessment(input: {
   name: string;
   email: string;
   history: ComparisonRecord[];
+  selectedNeeds: string[];
 }): Promise<{ assessment: Assessment; rawToken: string }> {
   const db = getDb();
   const [assessment] = await db
@@ -69,6 +89,7 @@ export async function createAssessment(input: {
       participantName: input.name,
       participantEmail: normalizeEmail(input.email),
       history: input.history,
+      selectedNeeds: input.selectedNeeds,
       taxonomyVersion: TAXONOMY_VERSION,
     })
     .returning();

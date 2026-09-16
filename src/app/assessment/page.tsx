@@ -7,11 +7,12 @@ import { NeedCard } from "@/components/NeedCard";
 import { exploredCategories } from "@/lib/ranking";
 import { CATEGORY_ACCENT, HERO_GRADIENT } from "@/lib/theme";
 import {
-  EXTENDED_MAX_COMPARISONS,
+  COMPARISON_COUNT,
   advanceAssessment,
   clearAssessmentState,
   createAssessmentState,
   loadAssessmentState,
+  loadSelection,
   saveAssessmentState,
   saveResults,
   type AssessmentState,
@@ -21,22 +22,26 @@ const needsById = new Map<string, RelationshipNeed>(
   NEEDS.map((n) => [n.id, n])
 );
 
-const ALL_CATEGORIES = Object.keys(CATEGORY_ACCENT) as NeedCategory[];
-
 export default function AssessmentPage() {
   const router = useRouter();
   const [state, setState] = useState<AssessmentState | null>(null);
 
   useEffect(() => {
+    const selection = loadSelection();
+    if (!selection) {
+      router.replace("/select");
+      return;
+    }
+
     const existing = loadAssessmentState();
     if (existing && existing.currentPair) {
       setState(existing);
     } else {
-      const fresh = createAssessmentState();
+      const fresh = createAssessmentState(selection);
       saveAssessmentState(fresh);
       setState(fresh);
     }
-  }, []);
+  }, [router]);
 
   if (!state || !state.currentPair) {
     return (
@@ -55,7 +60,7 @@ export default function AssessmentPage() {
     const nextState = advanceAssessment(state, winnerId, loserId);
 
     if (!nextState.currentPair) {
-      saveResults(nextState.history);
+      saveResults(nextState.history, nextState.selectedIds);
       clearAssessmentState();
       router.push("/results");
       return;
@@ -66,15 +71,21 @@ export default function AssessmentPage() {
   }
 
   const progress = state.history.length;
-  const progressPct = Math.round((progress / EXTENDED_MAX_COMPARISONS) * 100);
+  const progressPct = Math.round((progress / COMPARISON_COUNT) * 100);
   const touched = exploredCategories(state.history);
+
+  // Only the categories this person's own selection covers — showing all
+  // nine would leave dots that can never fill, implying missed ground.
+  const selectedCategories = [
+    ...new Set(state.selectedIds.map((id) => needsById.get(id)!.category)),
+  ] as NeedCategory[];
 
   return (
     <main className="mx-auto flex w-full max-w-sm flex-col gap-4 px-4 pb-6 pt-4">
       <div className="flex flex-none items-center gap-3">
         <button
-          onClick={() => router.push("/")}
-          aria-label="Back to home"
+          onClick={() => router.push("/select")}
+          aria-label="Back to choosing your needs"
           className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-white text-stone-500 shadow-sm"
         >
           ‹
@@ -86,7 +97,7 @@ export default function AssessmentPage() {
           />
         </div>
         <span className="flex-none text-xs font-medium text-stone-400">
-          {progress + 1}/{EXTENDED_MAX_COMPARISONS}
+          {progress + 1}/{COMPARISON_COUNT}
         </span>
       </div>
 
@@ -105,7 +116,7 @@ export default function AssessmentPage() {
             Your relationship-needs profile is taking shape.
           </p>
           <div className="flex gap-2">
-            {ALL_CATEGORIES.map((category) => (
+            {selectedCategories.map((category) => (
               <span
                 key={category}
                 title={category}

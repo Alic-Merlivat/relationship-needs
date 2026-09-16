@@ -30,6 +30,15 @@ export const assessments = pgTable("assessments", {
    */
   history: jsonb("history").$type<ComparisonRecord[]>().notNull(),
   /**
+   * The needs this person chose to rank.
+   *
+   * Null for assessments saved before selection existed, which ranked the
+   * entire card set — so null means "all of them", not "unknown". Keeping
+   * this explicit is what stops an unchosen need being read as a rejected
+   * one when two people's results are compared.
+   */
+  selectedNeeds: jsonb("selected_needs").$type<string[]>(),
+  /**
    * Which version of the needs taxonomy these choices were collected under.
    *
    * A stored history references need ids. When the card set changes, old

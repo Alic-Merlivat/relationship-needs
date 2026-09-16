@@ -3,19 +3,23 @@ import { selectNextPair } from "@/lib/adaptivePairing";
 import type { ComparisonRecord } from "@/lib/bradleyTerry";
 import {
   evaluateAssessmentConfidence,
-  EXTENDED_MAX_COMPARISONS,
-  MIN_COMPARISONS,
   type AssessmentConfidence,
 } from "@/lib/confidence";
 import { buildRanking } from "@/lib/ranking";
+import {
+  COMPARISON_COUNT,
+  parseSelection,
+  SELECTION_CONFIDENCE_CONFIG,
+} from "@/lib/selection";
 import type { Pair } from "@/lib/pairing";
 
-export { MIN_COMPARISONS, EXTENDED_MAX_COMPARISONS };
+export { COMPARISON_COUNT };
 
-// Bumped for the 9-Core-Need taxonomy: card ids changed, so older blobs
-// reference needs that no longer exist.
-const ASSESSMENT_KEY = "rn-assessment-state-v4";
-const RESULTS_KEY = "rn-results-v3";
+// Bumped to v5/v4: the assessment now ranks a self-chosen subset, so both
+// blobs carry the selected ids and older shapes can't be interpreted.
+const ASSESSMENT_KEY = "rn-assessment-state-v5";
+const RESULTS_KEY = "rn-results-v4";
+const SELECTION_KEY = "rn-selection-v1";
 const PARTNER_RANKS_KEY = "rn-partner-ranks-v3";
 const PENDING_INVITE_KEY = "rn-pending-invite-v1";
 
@@ -34,26 +38,32 @@ function referencesOnlyKnownNeeds(history: ComparisonRecord[]): boolean {
 }
 
 export interface AssessmentState {
+  /** The needs this person chose to rank, in pick order. */
+  selectedIds: string[];
   history: ComparisonRecord[];
   currentPair: Pair | null;
-  /** Confidence snapshot from the most recent evaluation checkpoint, if any. */
+  /** Quality of the finished result, evaluated once the last comparison lands. */
   confidence: AssessmentConfidence | null;
 }
 
-export function createAssessmentState(): AssessmentState {
-  const ids = NEEDS.map((n) => n.id);
+export function createAssessmentState(selectedIds: string[]): AssessmentState {
   return {
+    selectedIds,
     history: [],
-    currentPair: selectNextPair(ids, []),
+    currentPair: selectNextPair(selectedIds, [], COMPARISON_COUNT),
     confidence: null,
   };
 }
 
 /**
- * Records a choice, then either picks the next pair or stops the
- * assessment. Stopping is decided by `evaluateAssessmentConfidence` at each
- * evaluation checkpoint (40, 45, 50, 55, 60) — the assessment never stops
- * before 40, and always stops by 60 regardless of outcome.
+ * Records a choice, then either picks the next pair or ends the assessment.
+ *
+ * The length is fixed at `COMPARISON_COUNT` rather than decided adaptively:
+ * with 10 items that budget is 80% of a complete round-robin, so there is
+ * no meaningful early-stopping saving to chase, and a predictable length is
+ * worth more to the person answering. The confidence evaluation still runs
+ * at the end — not to decide when to stop, but to record how clearly the
+ * result separated.
  */
 export function advanceAssessment(
   state: AssessmentState,
@@ -61,15 +71,23 @@ export function advanceAssessment(
   loserId: string
 ): AssessmentState {
   const history = [...state.history, { winnerId, loserId }];
-  const ids = NEEDS.map((n) => n.id);
+  const { selectedIds } = state;
+  const finished = history.length >= COMPARISON_COUNT;
 
-  let confidence: AssessmentConfidence | null = state.confidence;
-  if (history.length >= MIN_COMPARISONS) {
-    confidence = evaluateAssessmentConfidence(ids, history);
-  }
-
-  const currentPair = confidence?.shouldStop ? null : selectNextPair(ids, history);
-  return { history, currentPair, confidence };
+  return {
+    selectedIds,
+    history,
+    currentPair: finished
+      ? null
+      : selectNextPair(selectedIds, history, COMPARISON_COUNT),
+    confidence: finished
+      ? evaluateAssessmentConfidence(
+          selectedIds,
+          history,
+          SELECTION_CONFIDENCE_CONFIG
+        )
+      : state.confidence,
+  };
 }
 
 export function loadAssessmentState(): AssessmentState | null {
@@ -80,7 +98,17 @@ export function loadAssessmentState(): AssessmentState | null {
     const parsed = JSON.parse(raw) as AssessmentState;
     if (!parsed || !Array.isArray(parsed.history)) return null;
     if (!referencesOnlyKnownNeeds(parsed.history)) return null;
-    return parsed;
+    const selectedIds = parseSelection(parsed.selectedIds);
+    if (!selectedIds) return null;
+    // A history referencing something outside the selection means the two
+    // have drifted apart (an older blob, a changed selection); restarting is
+    // safer than ranking needs the person didn't choose.
+    const selected = new Set(selectedIds);
+    const consistent = parsed.history.every(
+      (r) => selected.has(r.winnerId) && selected.has(r.loserId)
+    );
+    if (!consistent) return null;
+    return { ...parsed, selectedIds };
   } catch {
     return null;
   }
@@ -96,20 +124,34 @@ export function clearAssessmentState(): void {
   window.localStorage.removeItem(ASSESSMENT_KEY);
 }
 
-export function saveResults(history: ComparisonRecord[]): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(RESULTS_KEY, JSON.stringify({ history }));
+/**
+ * A finished assessment.
+ *
+ * `selectedIds` travels with the history everywhere, because a ranking is
+ * only interpretable against the set it ranked — and because the needs a
+ * person *didn't* pick must stay distinguishable from ones they ranked low.
+ */
+export interface StoredResults {
+  history: ComparisonRecord[];
+  selectedIds: string[];
 }
 
-export function loadResults(): ComparisonRecord[] | null {
+export function saveResults(history: ComparisonRecord[], selectedIds: string[]): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(RESULTS_KEY, JSON.stringify({ history, selectedIds }));
+}
+
+export function loadResults(): StoredResults | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(RESULTS_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { history?: ComparisonRecord[] };
+    const parsed = JSON.parse(raw) as Partial<StoredResults>;
     if (!parsed || !Array.isArray(parsed.history)) return null;
     if (!referencesOnlyKnownNeeds(parsed.history)) return null;
-    return parsed.history;
+    const selectedIds = parseSelection(parsed.selectedIds);
+    if (!selectedIds) return null;
+    return { history: parsed.history, selectedIds };
   } catch {
     return null;
   }
@@ -118,6 +160,32 @@ export function loadResults(): ComparisonRecord[] | null {
 export function clearResults(): void {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(RESULTS_KEY);
+}
+
+/**
+ * The in-progress selection, kept separate from the assessment state so
+ * going Back from ranking restores exactly what was picked — and so
+ * changing it can deliberately invalidate a part-finished ranking.
+ */
+export function saveSelection(ids: string[]): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(SELECTION_KEY, JSON.stringify(ids));
+}
+
+export function loadSelection(): string[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(SELECTION_KEY);
+    if (!raw) return null;
+    return parseSelection(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+export function clearSelection(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(SELECTION_KEY);
 }
 
 /**

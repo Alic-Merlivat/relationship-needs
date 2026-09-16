@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SavedResultsView } from "@/app/r/[token]/SavedResultsView";
+import { NEEDS } from "@/data/needs";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { resolveAccessToken } from "@/lib/server/assessmentStore";
 
@@ -46,6 +47,8 @@ export default async function SavedResultsPage({
     <SavedResultsView
       token={token}
       history={access.assessment.history}
+      // Null means the assessment predates selection and ranked everything.
+      selectedIds={access.assessment.selectedNeeds ?? NEEDS.map((n) => n.id)}
       name={access.assessment.participantName}
       partnerName={access.partner?.participantName ?? null}
       invitation={

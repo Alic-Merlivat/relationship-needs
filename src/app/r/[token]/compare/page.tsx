@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ComparisonView } from "@/app/r/[token]/compare/ComparisonView";
+import { NEEDS } from "@/data/needs";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { resolveAccessToken } from "@/lib/server/assessmentStore";
 
@@ -50,10 +51,13 @@ export default async function ComparePage({
       you={{
         name: access.assessment.participantName,
         history: access.assessment.history,
+        // Null means the assessment predates selection and ranked everything.
+        selectedIds: access.assessment.selectedNeeds ?? NEEDS.map((n) => n.id),
       }}
       them={{
         name: access.partner.participantName,
         history: access.partner.history,
+        selectedIds: access.partner.selectedNeeds ?? NEEDS.map((n) => n.id),
       }}
     />
   );

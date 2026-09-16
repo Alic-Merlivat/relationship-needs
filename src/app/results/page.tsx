@@ -2,34 +2,24 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { CoreNeedResults } from "@/components/CoreNeedResults";
-import { NEEDS, type RelationshipNeed } from "@/data/needs";
-import type { ComparisonRecord } from "@/lib/bradleyTerry";
-import { buildRanking } from "@/lib/ranking";
+import { RankedNeedResults } from "@/components/RankedNeedResults";
 import {
   clearAssessmentState,
-  clearPartnerRanks,
   clearPendingInvite,
   clearResults,
-  loadPartnerRanks,
+  clearSelection,
   loadPendingInvite,
   loadResults,
   type PendingInvite,
+  type StoredResults,
 } from "@/lib/storage";
-import { CATEGORY_ACCENT, HERO_GRADIENT } from "@/lib/theme";
-
-interface DiffNeed extends RelationshipNeed {
-  yourRank: number;
-  partnerRank: number;
-  gap: number;
-}
+import { HERO_GRADIENT } from "@/lib/theme";
 
 type SaveStatus = "idle" | "confirming" | "saving" | "error";
 
 export default function ResultsPage() {
   const router = useRouter();
-  const [history, setHistory] = useState<ComparisonRecord[] | null>(null);
-  const [diffs, setDiffs] = useState<DiffNeed[] | null>(null);
+  const [results, setResults] = useState<StoredResults | null>(null);
   const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null);
 
   const [name, setName] = useState("");
@@ -39,40 +29,24 @@ export default function ResultsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const storedHistory = loadResults();
-    if (!storedHistory) {
+    const stored = loadResults();
+    if (!stored) {
       router.replace("/");
       return;
     }
-    setHistory(storedHistory);
+    setResults(stored);
     setPendingInvite(loadPendingInvite());
-
-    // Legacy path: results that arrived in an older invitation URL. New
-    // invitations carry no results, but links already sent still work.
-    const partnerRanks = loadPartnerRanks();
-    if (partnerRanks) {
-      const yourRankById = new Map(buildRanking(storedHistory).map((r) => [r.id, r.rank]));
-      setDiffs(
-        NEEDS.map((need) => {
-          const yourRank = yourRankById.get(need.id)!;
-          const partnerRank = partnerRanks[need.id] ?? yourRank;
-          return { ...need, yourRank, partnerRank, gap: Math.abs(yourRank - partnerRank) };
-        })
-          .sort((a, b) => b.gap - a.gap)
-          .slice(0, 5)
-      );
-    }
   }, [router]);
 
   function handleRetake() {
     clearResults();
     clearAssessmentState();
-    clearPartnerRanks();
-    router.push("/assessment");
+    clearSelection();
+    router.push("/select");
   }
 
   async function save() {
-    if (!history) return;
+    if (!results) return;
     setStatus("saving");
     setError(null);
 
@@ -81,8 +55,14 @@ export default function ResultsPage() {
       : "/api/assessments";
 
     const payload = pendingInvite
-      ? { name, history }
-      : { name, email, history, partnerEmail: partnerEmail.trim() || undefined };
+      ? { name, history: results.history, selectedNeeds: results.selectedIds }
+      : {
+          name,
+          email,
+          history: results.history,
+          selectedNeeds: results.selectedIds,
+          partnerEmail: partnerEmail.trim() || undefined,
+        };
 
     try {
       const response = await fetch(endpoint, {
@@ -101,7 +81,7 @@ export default function ResultsPage() {
       clearPendingInvite();
       clearResults();
       clearAssessmentState();
-      clearPartnerRanks();
+      clearSelection();
       router.push(`/r/${data.token}`);
     } catch {
       setStatus("error");
@@ -120,7 +100,7 @@ export default function ResultsPage() {
     void save();
   }
 
-  if (!history) {
+  if (!results) {
     return (
       <main className="flex flex-1 items-center justify-center px-6 py-16">
         <p className="text-stone-400">Loading your results...</p>
@@ -149,40 +129,7 @@ export default function ResultsPage() {
         </button>
       </div>
 
-      <CoreNeedResults history={history} />
-
-      {diffs && (
-        <div className="flex flex-none flex-col gap-2 rounded-2xl bg-white p-4 shadow-sm">
-          <p className="text-[11px] font-medium uppercase tracking-widest text-stone-400">
-            You vs your partner
-          </p>
-          <p className="text-xs leading-relaxed text-stone-500">
-            The needs where your rankings differ most.
-          </p>
-          <ol className="flex flex-col gap-1.5">
-            {diffs.map((need) => (
-              <li
-                key={need.id}
-                className="flex items-center gap-2 rounded-xl bg-stone-50 px-2.5 py-1.5"
-              >
-                <span
-                  className="h-2 w-2 flex-none rounded-full"
-                  style={{ background: CATEGORY_ACCENT[need.category] }}
-                />
-                <span className="flex-1 truncate text-xs font-medium text-stone-800">
-                  {need.name}
-                </span>
-                <span className="flex-none text-[11px] font-semibold text-rose-400">
-                  You #{need.yourRank}
-                </span>
-                <span className="flex-none text-[11px] font-semibold text-sky-500">
-                  Them #{need.partnerRank}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
+      <RankedNeedResults history={results.history} selectedIds={results.selectedIds} />
 
       <form
         onSubmit={handleSubmit}

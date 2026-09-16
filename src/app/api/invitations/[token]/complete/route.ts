@@ -14,6 +14,7 @@ import {
   issueAccessToken,
   parseHistory,
   parseName,
+  parseSelectedNeeds,
   resolveInvitationToken,
 } from "@/lib/server/assessmentStore";
 
@@ -51,6 +52,14 @@ export async function POST(
     );
   }
 
+  const selectedNeeds = parseSelectedNeeds(body?.selectedNeeds, history);
+  if (!selectedNeeds) {
+    return NextResponse.json(
+      { error: "That assessment doesn't look complete. Please retake it." },
+      { status: 400 }
+    );
+  }
+
   const { allowed, retryAfterSeconds } = await checkRateLimit(
     RATE_LIMITS.createAssessment,
     clientIdentifier(request)
@@ -76,6 +85,7 @@ export async function POST(
     name,
     email: invitation.inviteeEmail,
     history,
+    selectedNeeds,
   });
 
   const attached = await attachInviteeAssessment({

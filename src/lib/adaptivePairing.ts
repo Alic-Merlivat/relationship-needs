@@ -1,22 +1,10 @@
 import { NEEDS } from "@/data/needs";
 import { fitBradleyTerry, type ComparisonRecord } from "@/lib/bradleyTerry";
-import { MIN_COMPARISONS } from "@/lib/confidence";
+import { COMPARISON_COUNT } from "@/lib/selection";
 import type { Pair } from "@/lib/pairing";
 
-export { MIN_COMPARISONS };
-
-// Stage boundaries (rounds), configurable — simulation may suggest changes.
-// Discovery: 1-16. Refinement: 17-30. Top-candidate identification: 31-MIN_COMPARISONS.
-const DISCOVERY_ROUNDS = 16;
-const REFINEMENT_ROUNDS = 14;
-
 const RECENCY_WINDOW = 3;
-const EXPOSURE_CAP_REFINEMENT = 6;
-const TOP_N_POOL_FINAL = 15;
-const BOUNDARY_RANK_MIN = 6;
-const BOUNDARY_RANK_MAX = 17;
-const BOUNDARY_BOOST = 1.5;
-/** Optimism bonus (in SE units) applied when deciding final-stage pool eligibility. */
+/** Optimism bonus (in SE units) applied when deciding pool eligibility. */
 const POOL_UCB_C = 1.0;
 
 // Confidence-refinement stage (41-60): tighter pool, stronger focus on the
@@ -122,12 +110,22 @@ function selectDiscoveryPair(ids: string[], history: ComparisonRecord[]): Pair {
   );
 }
 
-/** Rounds 17-30: compare needs whose current estimated strengths are closest. */
-function selectRefinementPair(ids: string[], history: ComparisonRecord[]): Pair {
+/** Middle stage: compare needs whose current estimated strengths are closest. */
+function selectRefinementPair(
+  ids: string[],
+  history: ComparisonRecord[],
+  totalRounds: number
+): Pair {
   const used = buildUsedPairs(history);
   const exposure = buildExposure(ids, history);
   const recent = buildRecent(history, RECENCY_WINDOW);
   const fit = fitBradleyTerry(ids, history);
+
+  // Scaled to the budget rather than fixed: every comparison shows two
+  // needs, so each one is seen 2*totalRounds/ids.length times on average.
+  // The cap exists to stop a single need hogging rounds, so it sits just
+  // above that average instead of below it, where it would block everything.
+  const exposureCap = Math.ceil((2 * totalRounds) / ids.length) + 1;
 
   const tryFind = (opts: { allowRecent: boolean; respectCap: boolean }): Pair | null => {
     let best: Pair | null = null;
@@ -135,11 +133,11 @@ function selectRefinementPair(ids: string[], history: ComparisonRecord[]): Pair 
     for (let x = 0; x < ids.length; x++) {
       const a = ids[x];
       if (!opts.allowRecent && recent.has(a)) continue;
-      if (opts.respectCap && exposure.get(a)! >= EXPOSURE_CAP_REFINEMENT) continue;
+      if (opts.respectCap && exposure.get(a)! >= exposureCap) continue;
       for (let y = x + 1; y < ids.length; y++) {
         const b = ids[y];
         if (!opts.allowRecent && recent.has(b)) continue;
-        if (opts.respectCap && exposure.get(b)! >= EXPOSURE_CAP_REFINEMENT) continue;
+        if (opts.respectCap && exposure.get(b)! >= exposureCap) continue;
         if (used.has(pairKey(a, b))) continue;
         const diff = Math.abs(fit.strength[a] - fit.strength[b]);
         if (diff < bestDiff) {
@@ -159,72 +157,15 @@ function selectRefinementPair(ids: string[], history: ComparisonRecord[]): Pair 
   );
 }
 
-/** Rounds 31-40: concentrate on the current top pool, especially the ambiguous boundary. */
-function selectFinalPair(ids: string[], history: ComparisonRecord[]): Pair {
-  const used = buildUsedPairs(history);
-  const recent = buildRecent(history, RECENCY_WINDOW);
-  const fit = fitBradleyTerry(ids, history);
-  const ranked = [...ids].sort((a, b) => fit.strength[b] - fit.strength[a]);
-  const rankIndex = new Map(ranked.map((id, i) => [id, i]));
-
-  // Pool eligibility uses an optimistic (strength + uncertainty) score rather
-  // than the raw point estimate: with only ~2-3 comparisons per need, a
-  // genuinely strong need can dip below the point-estimate cutoff from one
-  // unlucky result, and a flat/noise need can drift above it from one lucky
-  // one. Rewarding uncertainty here keeps under-tested contenders eligible
-  // until more evidence actually rules them out.
-  const poolRanked = [...ids].sort(
-    (a, b) =>
-      fit.strength[b] + POOL_UCB_C * fit.se[b] - (fit.strength[a] + POOL_UCB_C * fit.se[a])
-  );
-  const pool = poolRanked.slice(0, Math.min(TOP_N_POOL_FINAL, poolRanked.length));
-
-  const scoreOf = (a: string, b: string): number => {
-    let score = fit.se[a] + fit.se[b] - Math.abs(fit.strength[a] - fit.strength[b]);
-    const aBoundary =
-      rankIndex.get(a)! >= BOUNDARY_RANK_MIN && rankIndex.get(a)! <= BOUNDARY_RANK_MAX;
-    const bBoundary =
-      rankIndex.get(b)! >= BOUNDARY_RANK_MIN && rankIndex.get(b)! <= BOUNDARY_RANK_MAX;
-    if (aBoundary && bBoundary) score *= BOUNDARY_BOOST;
-    return score;
-  };
-
-  const tryFind = (opts: { allowRecent: boolean; usePool: boolean }): Pair | null => {
-    const candidates = opts.usePool ? pool : ranked;
-    let best: Pair | null = null;
-    let bestScore = -Infinity;
-    for (let x = 0; x < candidates.length; x++) {
-      const a = candidates[x];
-      if (!opts.allowRecent && recent.has(a)) continue;
-      for (let y = x + 1; y < candidates.length; y++) {
-        const b = candidates[y];
-        if (!opts.allowRecent && recent.has(b)) continue;
-        if (used.has(pairKey(a, b))) continue;
-        const score = scoreOf(a, b);
-        if (score > bestScore) {
-          bestScore = score;
-          best = [a, b];
-        }
-      }
-    }
-    return best;
-  };
-
-  return (
-    tryFind({ allowRecent: false, usePool: true }) ??
-    tryFind({ allowRecent: true, usePool: true }) ??
-    tryFind({ allowRecent: true, usePool: false }) ??
-    fallbackPair(ids, history)
-  );
-}
-
 /**
- * Rounds 41-60 (only reached if the assessment didn't already stop at 40):
- * the ranking question is settled for everything except the Top 3 boundary.
- * Pool shrinks to the current Top 10, and scoring leans hard into the #3/#4
- * region specifically — this is a distinct objective from the 31-40 stage
- * (which still cares about the whole #8-15 boundary), so it gets its own
- * strategy rather than reusing/overloading selectFinalPair.
+ * Final stage: the ordering is broadly settled, so spend the remaining
+ * rounds on the Top-3 boundary specifically — that is the part of the
+ * result the person actually reads.
+ *
+ * (A wider "#8-15 boundary" stage used to sit between refinement and this
+ * one. It was built for a 46-need assessment where the top 10 was the
+ * headline; ranking 10 self-chosen needs makes that objective meaningless,
+ * so it was removed rather than left unreachable.)
  */
 function selectConfidenceRefinementPair(ids: string[], history: ComparisonRecord[]): Pair {
   const used = buildUsedPairs(history);
@@ -290,15 +231,24 @@ function selectConfidenceRefinementPair(ids: string[], history: ComparisonRecord
 /**
  * Picks the next comparison pair given everything answered so far. Never
  * repeats an exact pair, avoids re-showing a need within the last few
- * rounds, and moves through four stages: broad discovery, closest-strength
- * refinement, top-candidate identification, and — only if the assessment
- * runs past the 40-comparison minimum — confidence refinement focused on
- * the Top-3 boundary specifically.
+ * rounds, and moves through three equal stages: broad discovery for even
+ * exposure, closest-strength refinement, then Top-3 boundary focus.
+ *
+ * Stage boundaries are derived from `totalRounds` rather than fixed, so the
+ * same strategy holds whatever budget it is given.
  */
-export function selectNextPair(ids: string[], history: ComparisonRecord[]): Pair {
+export function selectNextPair(
+  ids: string[],
+  history: ComparisonRecord[],
+  totalRounds: number = COMPARISON_COUNT
+): Pair {
   const round = history.length + 1;
-  if (round <= DISCOVERY_ROUNDS) return selectDiscoveryPair(ids, history);
-  if (round <= DISCOVERY_ROUNDS + REFINEMENT_ROUNDS) return selectRefinementPair(ids, history);
-  if (round <= MIN_COMPARISONS) return selectFinalPair(ids, history);
+  const discoveryRounds = Math.round(totalRounds / 3);
+  const refinementRounds = Math.round(totalRounds / 3);
+
+  if (round <= discoveryRounds) return selectDiscoveryPair(ids, history);
+  if (round <= discoveryRounds + refinementRounds) {
+    return selectRefinementPair(ids, history, totalRounds);
+  }
   return selectConfidenceRefinementPair(ids, history);
 }

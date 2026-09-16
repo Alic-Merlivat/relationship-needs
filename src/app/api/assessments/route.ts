@@ -13,6 +13,7 @@ import {
   createInvitation,
   parseHistory,
   parseName,
+  parseSelectedNeeds,
 } from "@/lib/server/assessmentStore";
 import { isPlausibleEmail, normalizeEmail } from "@/lib/tokens";
 
@@ -51,6 +52,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const selectedNeeds = parseSelectedNeeds(body?.selectedNeeds, history);
+  if (!selectedNeeds) {
+    return NextResponse.json(
+      { error: "That assessment doesn't look complete. Please retake it." },
+      { status: 400 }
+    );
+  }
+
   const wantsInvite = rawPartnerEmail !== undefined && rawPartnerEmail !== null && rawPartnerEmail !== "";
   if (wantsInvite && !isPlausibleEmail(rawPartnerEmail)) {
     return NextResponse.json(
@@ -80,7 +89,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const { assessment, rawToken } = await createAssessment({ name, email, history });
+  const { assessment, rawToken } = await createAssessment({
+    name,
+    email,
+    history,
+    selectedNeeds,
+  });
   const resultsUrl = `${appUrl()}/r/${rawToken}`;
 
   let inviteSent = false;
