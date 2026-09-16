@@ -16,6 +16,30 @@ const CONFIDENCE_BOUNDARY_BOOST = 1.8;
 const CONFIDENCE_TOP8_RANK_MAX = 7; // 0-indexed rank 7 (displayed #8)
 const CONFIDENCE_TOP8_BOOST = 1.3;
 
+/**
+ * How many times one pair may be asked in total.
+ *
+ * Re-asking is the point of the final stage — a pair's contribution to the
+ * Fisher information is n_ij·q_ij·(1−q_ij), so asking two closely-matched
+ * leaders again is the single most informative question available, and
+ * refusing to repeat caps how well #1 can ever be known. The cap exists
+ * only so the same two cards don't dominate the run and read as a bug.
+ *
+ * Measured: raising this to 5, or dropping REPEAT_PENALTY to 0.08 so
+ * repeats are chosen far more freely, both leave accuracy unchanged within
+ * noise. Repeating is worth doing, but past two or three askings of the
+ * decisive pair the remaining uncertainty is in the needs' true closeness,
+ * not in how often they were compared.
+ */
+const MAX_ASKS_PER_PAIR = 3;
+
+/**
+ * Score charged per previous asking of a pair, so a fresh comparison of
+ * similar value is preferred while a genuinely decisive one can still
+ * repeat. Subtracted rather than divided because scores go negative.
+ */
+const REPEAT_PENALTY = 0.35;
+
 const CATEGORY_OF: Record<string, string> = Object.fromEntries(
   NEEDS.map((n) => [n.id, n.category])
 );
@@ -35,6 +59,16 @@ function pairKey(a: string, b: string): string {
 
 function buildUsedPairs(history: ComparisonRecord[]): Set<string> {
   return new Set(history.map((r) => pairKey(r.winnerId, r.loserId)));
+}
+
+/** How many times each pair has already been asked. */
+function buildPairCounts(history: ComparisonRecord[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const { winnerId, loserId } of history) {
+    const key = pairKey(winnerId, loserId);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
 }
 
 function buildExposure(ids: string[], history: ComparisonRecord[]): Map<string, number> {
@@ -168,7 +202,7 @@ function selectRefinementPair(
  * so it was removed rather than left unreachable.)
  */
 function selectConfidenceRefinementPair(ids: string[], history: ComparisonRecord[]): Pair {
-  const used = buildUsedPairs(history);
+  const pairCounts = buildPairCounts(history);
   const recent = buildRecent(history, RECENCY_WINDOW);
   const fit = fitBradleyTerry(ids, history);
   const ranked = [...ids].sort((a, b) => fit.strength[b] - fit.strength[a]);
@@ -194,9 +228,14 @@ function selectConfidenceRefinementPair(ids: string[], history: ComparisonRecord
       bRank >= CONFIDENCE_BOUNDARY_RANK_MIN &&
       bRank <= CONFIDENCE_BOUNDARY_RANK_MAX;
     const bothTop8 = aRank <= CONFIDENCE_TOP8_RANK_MAX && bRank <= CONFIDENCE_TOP8_RANK_MAX;
-    if (bothNearBoundary) score *= CONFIDENCE_BOUNDARY_BOOST;
+    // The pair that decides #1 — the top two, closely matched — deserves
+    // the strongest pull of all, and is exactly the pair a no-repeat rule
+    // would have retired after a single asking.
+    const bothLeaders = aRank <= 1 && bRank <= 1;
+    if (bothLeaders) score *= CONFIDENCE_BOUNDARY_BOOST;
+    else if (bothNearBoundary) score *= CONFIDENCE_BOUNDARY_BOOST;
     else if (bothTop8) score *= CONFIDENCE_TOP8_BOOST;
-    return score;
+    return score - REPEAT_PENALTY * (pairCounts.get(pairKey(a, b)) ?? 0);
   };
 
   const tryFind = (opts: { allowRecent: boolean; usePool: boolean }): Pair | null => {
@@ -209,7 +248,7 @@ function selectConfidenceRefinementPair(ids: string[], history: ComparisonRecord
       for (let y = x + 1; y < candidates.length; y++) {
         const b = candidates[y];
         if (!opts.allowRecent && recent.has(b)) continue;
-        if (used.has(pairKey(a, b))) continue;
+        if ((pairCounts.get(pairKey(a, b)) ?? 0) >= MAX_ASKS_PER_PAIR) continue;
         const score = scoreOf(a, b);
         if (score > bestScore) {
           bestScore = score;
