@@ -38,38 +38,22 @@ rating scales let people avoid.
 
 ## How it works
 
-<table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/front-page.png" width="260" alt="The landing page"><br>
-      <strong>myrelationshipneeds.com</strong>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/select-needs.png" width="260" alt="Selecting the ten most important needs"><br>
-      <strong>Selecting the 10 most important needs</strong>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/assessment.png" width="260" alt="The pairwise assessment screen"><br>
-      <strong>Assessment page</strong>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/share-results.png" width="260" alt="Your ranked results"><br>
-      <strong>Result</strong>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/email-results-1.png" width="260" alt="Inviting a partner by email"><br>
-      <strong>Invite your partner</strong>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/email-results-2.png" width="260" alt="Confirming the partner's email before sending"><br>
-      <strong>Double-checked before it sends</strong>
-    </td>
-  </tr>
-</table>
+### myrelationshipneeds.com
+<img src="docs/screenshots/front-page.png" width="260" alt="The landing page"><br>
+### Selecting the 10 most important needs
+<img src="docs/screenshots/select-needs.png" width="260" alt="Selecting the ten most important needs"><br>
+### Assessment page
+<img src="docs/screenshots/assessment.png" width="260" alt="The pairwise assessment screen"><br>
+### Result
+<img src="docs/screenshots/share-results.png" width="260" alt="Your ranked results"><br>
+### Invite your partner
+<img src="docs/screenshots/email-results-1.png" width="260" alt="Inviting a partner by email"><br>
+### Double-checked before it sends
+ <img src="docs/screenshots/email-results-2.png" width="260" alt="Confirming the partner's email before sending"><br>
+### Email reception
+
+### Comparaison
+
 
 **1. Choose ten.** All 46 needs, grouped into nine Core Needs — Love &
 Affection, Security & Trust, Autonomy & Boundaries, and so on. You pick the
