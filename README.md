@@ -12,6 +12,31 @@ two things you both want is a much easier question to answer honestly than
 "rate how important closeness is to you," and it forces the trade-offs that
 rating scales let people avoid.
 
+## Technology Stack and Features
+
+- ⚡ [**Next.js**](https://nextjs.org) (App Router) for the full stack.
+    - ⚛️ [React 19](https://react.dev) for the frontend.
+    - 🔤 [TypeScript](https://www.typescriptlang.org) in strict mode.
+    - 🎨 [Tailwind CSS v4](https://tailwindcss.com) for styling.
+    - 📱 Mobile-first design.
+- 📊 A [**Bradley–Terry**](https://en.wikipedia.org/wiki/Bradley%E2%80%93Terry_model) ranking model, written from scratch.
+    - 🔁 Batch-fitted, so results never depend on question order.
+    - 📐 Fisher information matrix for a per-need standard error.
+    - 🎯 Adaptive pairing that targets the comparisons that matter.
+    - 🤔 Reports "too close to call" instead of inventing a winner.
+- 💾 [**PostgreSQL**](https://www.postgresql.org) as the SQL database, hosted on [Neon](https://neon.tech).
+    - 🧰 [Drizzle ORM](https://orm.drizzle.team) for typed schema and queries.
+    - 📜 Plain-SQL migrations, idempotent and runnable by hand.
+- ✉️ [**Resend**](https://resend.com) for transactional email, from a verified domain.
+- 🔑 Passwordless access — no accounts, no passwords, no login.
+    - 🔒 256-bit random tokens, stored only as SHA-256 hashes.
+    - ⏳ 30-day expiry, with reissue and revocation.
+    - 🛡️ Rate limiting on every endpoint that sends mail.
+    - 🙈 Invitations that carry none of the sender's results.
+- 🧪 Monte Carlo simulations that import the real production modules.
+- ☁️ Deployed on [**Vercel**](https://vercel.com) with automatic HTTPS.
+- 🪶 Five runtime dependencies in total.
+
 ## How it works
 
 **1. Choose ten.** All 46 needs, grouped into nine Core Needs — Love &
