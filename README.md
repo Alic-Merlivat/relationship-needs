@@ -32,7 +32,9 @@ rating scales let people avoid.
     - ⏳ 30-day expiry, with reissue and revocation.
     - 🛡️ Rate limiting on every endpoint that sends mail.
     - 🙈 Invitations that carry none of the sender's results.
+- 💬 One-tap WhatsApp sharing — no phone number collected; WhatsApp's own contact picker chooses the recipient.
 - 🧪 Monte Carlo simulations that import the real production modules.
+- ✅ [Vitest](https://vitest.dev) unit and component tests for the comparison page's interpretive logic.
 - ☁️ Deployed on [**Vercel**](https://vercel.com) with automatic HTTPS.
 - 🪶 Five runtime dependencies in total.
 
@@ -66,9 +68,12 @@ have more of only one, which would you choose?*
 **3. See what emerges.** Your needs, ordered by how consistently you leaned
 toward them.
 
-**4. Optionally, compare.** Invite a partner by email. They take the same
-assessment without seeing your answers first, and afterwards you each see
-what you both chose, and what only one of you did.
+**4. Optionally, compare.** Share an invite over WhatsApp — no email needed,
+WhatsApp's own contact picker chooses who — or send one by email instead.
+Your partner takes the same assessment without seeing your answers first.
+Once you're both done, you get more than a list: a plain-language read on
+how much you overlap, what you share, what's each of yours to explain, and
+a next step toward actually talking about it.
 
 ## What the results actually mean
 
@@ -117,9 +122,11 @@ it is stored. Links last 30 days and can be reissued or revoked.
 
 An invitation carries no part of the sender's results — the invited partner
 sees nothing until they've finished their own assessment, is told before
-starting what will be shared, and can decline. Their email comes from the
-invitation rather than a form, so results always reach the address that was
-actually invited.
+starting what will be shared, and can decline. An email invitation is
+addressed in advance, so results always reach the address that was actually
+invited; a WhatsApp-shared invitation carries no address at all until the
+partner finishes and gives their own email, the one moment it's actually
+needed.
 
 ## Running it locally
 
@@ -147,6 +154,16 @@ runs, and the persistence routes report that they aren't configured.
 Run the migrations in `drizzle/` against your database in order, once each.
 They're plain SQL and safe to re-run.
 
+### Tests
+
+```bash
+npm test
+```
+
+Runs the Vitest suite — the comparison page's interpretive logic (overlap
+tiers, rank-gap wording, the highest-shared-priority tie-break) and its
+expand/collapse behaviour. No database needed.
+
 ## Project layout
 
 | Path | What's in it |
@@ -157,6 +174,8 @@ They're plain SQL and safe to re-run.
 | `src/lib/confidence.ts` | Whether a result is clearly separated or clustered |
 | `src/lib/selection.ts` | Selection size and comparison budget |
 | `src/lib/storage.ts` | Browser state for an in-progress assessment |
+| `src/lib/comparisonInsights.ts` | Interpretive copy for the joint comparison page |
+| `src/lib/whatsapp.ts` | WhatsApp share-link builder |
 | `src/lib/server/` | Server-side persistence and token handling |
 | `src/app/select/` | Choosing your ten |
 | `src/app/assessment/` | The pairwise comparisons |
