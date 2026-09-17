@@ -17,13 +17,17 @@ import {
   parseSelectedNeeds,
   resolveInvitationToken,
 } from "@/lib/server/assessmentStore";
+import { isPlausibleEmail } from "@/lib/tokens";
 
 /**
  * The invited partner finishing their assessment.
  *
- * Their email is never taken from the request body — it comes from the
- * invitation, so results always reach the address that was actually
- * invited even if the link was forwarded to someone else.
+ * When the invitation was addressed by email, that email is used — never
+ * the request body — so results always reach the address that was actually
+ * invited even if the link was forwarded to someone else. A WhatsApp-shared
+ * invitation carries no address at all, so in that case the invitee's own
+ * submitted email is what we use instead; there is nothing else to check it
+ * against.
  */
 export async function POST(
   request: NextRequest,
@@ -81,9 +85,20 @@ export async function POST(
 
   const { invitation, inviter } = resolved;
 
+  let inviteeEmail = invitation.inviteeEmail;
+  if (!inviteeEmail) {
+    if (!isPlausibleEmail(body?.email)) {
+      return NextResponse.json(
+        { error: "Please enter a valid email address." },
+        { status: 400 }
+      );
+    }
+    inviteeEmail = body.email as string;
+  }
+
   const { assessment: invitee, rawToken } = await createAssessment({
     name,
-    email: invitation.inviteeEmail,
+    email: inviteeEmail,
     history,
     selectedNeeds,
   });

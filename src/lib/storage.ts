@@ -198,6 +198,12 @@ export function clearSelection(): void {
 export interface PendingInvite {
   token: string;
   inviterName: string;
+  /**
+   * False for a WhatsApp-shared invitation, where nobody typed an address —
+   * the completion form needs to ask the invitee for their own email in
+   * that case, since there is nowhere else it could come from.
+   */
+  inviteeEmailKnown: boolean;
 }
 
 export function savePendingInvite(invite: PendingInvite): void {
@@ -211,7 +217,11 @@ export function loadPendingInvite(): PendingInvite | null {
     const raw = window.localStorage.getItem(PENDING_INVITE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PendingInvite;
-    if (typeof parsed?.token !== "string" || typeof parsed?.inviterName !== "string") {
+    if (
+      typeof parsed?.token !== "string" ||
+      typeof parsed?.inviterName !== "string" ||
+      typeof parsed?.inviteeEmailKnown !== "boolean"
+    ) {
       return null;
     }
     return parsed;

@@ -28,14 +28,19 @@ export function InviteLanding({
   token: string;
   inviterName: string;
   inviterEmail: string;
-  inviteeEmail: string;
+  /** Null for a WhatsApp-shared invitation — nobody typed an address. */
+  inviteeEmail: string | null;
 }) {
   const router = useRouter();
   const [declining, setDeclining] = useState(false);
   const [declined, setDeclined] = useState(false);
 
   function start() {
-    savePendingInvite({ token, inviterName });
+    savePendingInvite({
+      token,
+      inviterName,
+      inviteeEmailKnown: inviteeEmail !== null,
+    });
     // A fresh start: nothing from a previous run on this device should bleed
     // into the assessment now being taken on someone else's behalf.
     clearAssessmentState();
@@ -112,11 +117,23 @@ export function InviteLanding({
             strongest areas and where you differ.
           </li>
           <li>
-            <span className="font-medium text-stone-800">
-              Your link goes to {inviteeEmail}.
-            </span>{" "}
-            That&apos;s the address {inviterName} entered, and it&apos;s where
-            your own private results will be sent.
+            {inviteeEmail ? (
+              <>
+                <span className="font-medium text-stone-800">
+                  Your link goes to {inviteeEmail}.
+                </span>{" "}
+                That&apos;s the address {inviterName} entered, and it&apos;s
+                where your own private results will be sent.
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-stone-800">
+                  You&apos;ll tell us your own email at the end.
+                </span>{" "}
+                That&apos;s where your private results link will be sent —
+                {inviterName} won&apos;t see it.
+              </>
+            )}
           </li>
         </ul>
       </div>

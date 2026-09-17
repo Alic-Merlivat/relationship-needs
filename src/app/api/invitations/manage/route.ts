@@ -14,7 +14,8 @@ import {
 } from "@/lib/server/assessmentStore";
 
 /**
- * Cancel or re-send the invitation you sent.
+ * Cancel, re-send by email, or mint a fresh link to share yourself (e.g.
+ * over WhatsApp) for the invitation you sent.
  *
  * Authorised by the inviter's own results token — the same capability that
  * shows them their results — so there is no separate management credential
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const action = body?.action;
 
-  if (action !== "revoke" && action !== "resend") {
+  if (action !== "revoke" && action !== "resend" && action !== "share") {
     return NextResponse.json({ error: "Unknown action." }, { status: 400 });
   }
 
@@ -51,14 +52,35 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // Both "resend" and "share" rotate the invitation's token, so both draw
+  // from the same limit — rapid rotation from either path invalidates the
+  // link just as fast, and the cost of minting is the same either way.
   const { allowed, retryAfterSeconds } = await checkRateLimit(
     RATE_LIMITS.resendInvite,
     clientIdentifier(request)
   );
   if (!allowed) {
     return NextResponse.json(
-      { error: "You've re-sent this a few times already. Please try again later." },
+      { error: "You've done this a few times already. Please try again later." },
       { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+    );
+  }
+
+  if (action === "share") {
+    // No email sent here — the caller is about to hand the link to their
+    // partner themselves (WhatsApp, text, in person), so nothing goes out
+    // from the server for this action.
+    const rawToken = await resendInvitation(invitation.id);
+    return NextResponse.json({ url: `${appUrl()}/invite/${rawToken}` });
+  }
+
+  if (!invitation.inviteeEmail) {
+    // A WhatsApp-shared invitation has no address on file — there's nothing
+    // for "resend by email" to send to. The client only shows this option
+    // when an address is known, so reaching here means a stale request.
+    return NextResponse.json(
+      { error: "This invitation has no email address to resend to." },
+      { status: 409 }
     );
   }
 

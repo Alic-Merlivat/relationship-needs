@@ -53,7 +53,10 @@ export default async function SavedResultsPage({
       partnerName={access.partner?.participantName ?? null}
       invitation={
         invitation
-          ? { email: invitation.inviteeEmail, status: invitation.status }
+          ? {
+              email: invitation.inviteeEmail,
+              status: invitation.status,
+            }
           : null
       }
       wasInvited={Boolean(access.receivedInvitation)}

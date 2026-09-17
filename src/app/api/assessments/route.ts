@@ -38,6 +38,7 @@ export async function POST(request: NextRequest) {
   const email = body?.email;
   const history = parseHistory(body?.history);
   const rawPartnerEmail = body?.partnerEmail;
+  const wantsWhatsAppInvite = body?.wantsWhatsAppInvite === true;
 
   if (!name) {
     return NextResponse.json({ error: "Please enter your first name." }, { status: 400 });
@@ -60,14 +61,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const wantsInvite = rawPartnerEmail !== undefined && rawPartnerEmail !== null && rawPartnerEmail !== "";
-  if (wantsInvite && !isPlausibleEmail(rawPartnerEmail)) {
+  const wantsEmailInvite =
+    rawPartnerEmail !== undefined && rawPartnerEmail !== null && rawPartnerEmail !== "";
+  if (wantsEmailInvite && !isPlausibleEmail(rawPartnerEmail)) {
     return NextResponse.json(
       { error: "Please enter a valid email address for your partner." },
       { status: 400 }
     );
   }
-  if (wantsInvite && normalizeEmail(rawPartnerEmail) === normalizeEmail(email)) {
+  if (wantsEmailInvite && normalizeEmail(rawPartnerEmail) === normalizeEmail(email)) {
     return NextResponse.json(
       { error: "Your partner's email needs to be different from your own." },
       { status: 400 }
@@ -99,12 +101,18 @@ export async function POST(request: NextRequest) {
 
   let inviteSent = false;
   let inviteError: string | null = null;
+  let inviteUrl: string | null = null;
 
-  if (wantsInvite) {
+  if (wantsEmailInvite) {
     const { rawToken: inviteToken } = await createInvitation({
       inviterAssessmentId: assessment.id,
       inviteeEmail: rawPartnerEmail,
     });
+    // Returned to the client alongside the email send: this person just
+    // typed the partner's address themselves, so handing back the link they
+    // already caused to exist isn't a new exposure — it lets them relay it
+    // another way (WhatsApp, text) if email doesn't land.
+    inviteUrl = `${appUrl()}/invite/${inviteToken}`;
 
     if (isEmailConfigured()) {
       const result = await sendEmail(
@@ -112,7 +120,7 @@ export async function POST(request: NextRequest) {
         invitationEmail({
           inviterName: assessment.participantName,
           inviterEmail: assessment.participantEmail,
-          url: `${appUrl()}/invite/${inviteToken}`,
+          url: inviteUrl,
         })
       );
       inviteSent = result.ok;
@@ -120,6 +128,13 @@ export async function POST(request: NextRequest) {
     } else {
       inviteError = "We saved your results, but email isn't configured yet.";
     }
+  } else if (wantsWhatsAppInvite) {
+    // No address to send to — the person is about to hand this link to
+    // their partner themselves, via WhatsApp's own contact picker.
+    const { rawToken: inviteToken } = await createInvitation({
+      inviterAssessmentId: assessment.id,
+    });
+    inviteUrl = `${appUrl()}/invite/${inviteToken}`;
   }
 
   // The person already has their results on screen; a failed copy to their
@@ -128,5 +143,5 @@ export async function POST(request: NextRequest) {
     await sendEmail(assessment.participantEmail, resultsEmail(name, resultsUrl));
   }
 
-  return NextResponse.json({ token: rawToken, inviteSent, inviteError });
+  return NextResponse.json({ token: rawToken, inviteSent, inviteError, inviteUrl });
 }

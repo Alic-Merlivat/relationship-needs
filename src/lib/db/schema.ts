@@ -92,8 +92,15 @@ export const invitations = pgTable(
     inviterAssessmentId: uuid("inviter_assessment_id")
       .notNull()
       .references(() => assessments.id, { onDelete: "cascade" }),
-    /** Always stored lowercased — see `normalizeEmail`. */
-    inviteeEmail: text("invitee_email").notNull(),
+    /**
+     * Always stored lowercased — see `normalizeEmail`.
+     *
+     * Nullable: a WhatsApp-shared invitation has no address at creation —
+     * the invitee picks who to send it to inside WhatsApp itself, not by
+     * anyone typing an email. It stays null even after they complete their
+     * assessment; their own email lives on their own assessment row instead.
+     */
+    inviteeEmail: text("invitee_email"),
     inviteeAssessmentId: uuid("invitee_assessment_id").references(
       () => assessments.id,
       { onDelete: "set null" }

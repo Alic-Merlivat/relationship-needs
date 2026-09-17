@@ -207,9 +207,17 @@ export async function resolveAccessToken(
   };
 }
 
+/**
+ * Creates an invitation.
+ *
+ * `inviteeEmail` is optional: omit it for a WhatsApp-shared invite, where
+ * nobody has typed a partner's address — the invitee is chosen inside
+ * WhatsApp's own contact picker, and their email is only known once they
+ * finish their own assessment.
+ */
 export async function createInvitation(input: {
   inviterAssessmentId: string;
-  inviteeEmail: string;
+  inviteeEmail?: string;
 }): Promise<{ invitation: Invitation; rawToken: string }> {
   const db = getDb();
   const { raw, hash } = createToken();
@@ -217,7 +225,7 @@ export async function createInvitation(input: {
     .insert(invitations)
     .values({
       inviterAssessmentId: input.inviterAssessmentId,
-      inviteeEmail: normalizeEmail(input.inviteeEmail),
+      inviteeEmail: input.inviteeEmail ? normalizeEmail(input.inviteeEmail) : null,
       tokenHash: hash,
       expiresAt: daysFromNow(INVITATION_TTL_DAYS),
       lastSentAt: new Date(),
