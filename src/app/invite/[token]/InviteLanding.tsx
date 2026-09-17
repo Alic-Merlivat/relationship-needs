@@ -92,9 +92,8 @@ export function InviteLanding({
       </div>
 
       <p className="text-center text-sm leading-relaxed text-stone-600">
-        They worked out which relationship needs matter most to them, and
-        asked to compare notes with you. It takes about five minutes — you
-        just pick between two things at a time.
+        I discovered my relationship needs and would like to know about
+        yours. It takes about five minutes.
       </p>
 
       <div className="flex flex-col gap-2 rounded-2xl bg-white p-4 shadow-sm">
