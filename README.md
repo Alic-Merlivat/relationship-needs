@@ -23,7 +23,6 @@ rating scales let people avoid.
     - 🔁 Batch-fitted, so results never depend on question order.
     - 📐 Fisher information matrix for a per-need standard error.
     - 🎯 Adaptive pairing that targets the comparisons that matter.
-    - 🤔 Reports "too close to call" instead of inventing a winner.
 - 💾 [**PostgreSQL**](https://www.postgresql.org) as the SQL database, hosted on [Neon](https://neon.tech).
     - 🧰 [Drizzle ORM](https://orm.drizzle.team) for typed schema and queries.
     - 📜 Plain-SQL migrations, idempotent and runnable by hand.
@@ -92,10 +91,6 @@ of times at most. Raising the repeat cap, weakening the repeat penalty, and
 extending to a full 45-comparison round-robin were each measured and none
 moved accuracy. The remaining uncertainty is in how close the needs truly
 are, not in how often they were compared.
-
-Separately: the results screen currently presents a confident #1 while the
-confidence evaluation reports a *clustered* top nearly every time. The maths
-knows; the UI doesn't say so yet.
 
 ## Privacy
 
