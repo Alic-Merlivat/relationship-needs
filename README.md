@@ -50,8 +50,6 @@ rating scales let people avoid.
 <img src="docs/screenshots/share-results.png" width="260" alt="Your ranked results"><br>
 ### Invite your partner
 <img src="docs/screenshots/email-results-1.png" width="260" alt="Inviting a partner by email"><br>
-### Double-checked before it sends
- <img src="docs/screenshots/email-results-2.png" width="260" alt="Confirming the partner's email before sending"><br>
 ### Email reception
 
 ### Comparaison
