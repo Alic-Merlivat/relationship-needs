@@ -51,7 +51,7 @@ rating scales let people avoid.
 ### Invite your partner
 <img src="docs/screenshots/email-results-1.png" width="260" alt="Inviting a partner by email"><br>
 ### Email reception
-
+<img src="docs/screenshots/email.png" width="260" alt="The results email as received"><br>
 ### Comparaison
 
 
