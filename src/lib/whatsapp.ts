@@ -19,8 +19,7 @@
 export function whatsAppInviteUrl(inviteUrl: string): string {
   const message = [
     "Hi, I just worked out which relationship needs matter to me, and wanted to compare them with you.",
-    "It's about 5 minutes of discovering yourself and us.",
-    `When you're done, we'll each be able to see where we line up and where you differ. Thank you ❤️`,
+    "When you're done, we'll each be able to see where we line up and differ. Thank you",
     inviteUrl,
   ].join("\n\n");
   return `https://wa.me/?text=${encodeURIComponent(message)}`;
